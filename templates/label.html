@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Label – {{ box.name }}</title>
+  <style>
+    @page { size: 4in 3in; margin: .25in; }
+    body { font-family: -apple-system, sans-serif; text-align: center; padding: 1rem; }
+    .label { border: 2px solid #000; border-radius: 8px; padding: 1rem; max-width: 360px; margin: 0 auto; }
+    .label h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    .label .location { font-size: .9rem; color: #555; margin-bottom: .75rem; }
+    .label img { width: 160px; height: 160px; }
+    .label .items { text-align: left; font-size: .75rem; margin-top: .75rem; padding-top: .5rem; border-top: 1px solid #ccc; }
+    .label .items li { margin-bottom: .15rem; }
+    .label .footer { font-size: .65rem; color: #999; margin-top: .5rem; }
+    @media print {
+      body { padding: 0; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom:1rem;">
+    <button onclick="window.print()" style="padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;">Print Label</button>
+  </div>
+  <div class="label">
+    <h1>{{ box.name }}</h1>
+    {% if box.location %}<div class="location">{{ box.location }}</div>{% endif %}
+    <img src="{{ base_url }}/api/boxes/{{ box.id }}/qr" alt="QR Code">
+    {% if box.items %}
+    <ul class="items">
+      {% for item in box.items %}
+      <li>{{ item.name }}{% if item.quantity > 1 %} (x{{ item.quantity }}){% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <div class="footer">Scan QR code to view contents</div>
+  </div>
+</body>
+</html>
