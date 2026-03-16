@@ -535,6 +535,77 @@ function esc(str) {
   return div.innerHTML;
 }
 
+// ── Management: CSV Export ───────────────────────────────────────────────
+
+async function exportInventory() {
+  try {
+    const boxes = await api("/boxes");
+    const rows = [["Box Name", "Destination Room", "Status", "Notes", "Item Name", "Quantity", "Category"]];
+    for (const box of boxes) {
+      if (box.items.length === 0) {
+        rows.push([box.name, box.location, box.sealed ? "Sealed" : "Open", box.notes, "", "", ""]);
+      } else {
+        for (const item of box.items) {
+          rows.push([box.name, box.location, box.sealed ? "Sealed" : "Open", box.notes, item.name, item.quantity, item.category]);
+        }
+      }
+    }
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `packtrack-inventory-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("Inventory exported!", "success");
+  } catch (err) {
+    toast("Export failed: " + err.message, "error");
+  }
+}
+
+// ── Management: Print All Labels ────────────────────────────────────────
+
+async function printAllLabels() {
+  try {
+    const boxes = await api("/boxes");
+    if (boxes.length === 0) { toast("No boxes to print", "error"); return; }
+    // Open a new window with all labels
+    const win = window.open("", "_blank");
+    win.document.write(`
+      <!DOCTYPE html><html><head><title>All Labels</title>
+      <style>
+        body { font-family: -apple-system, sans-serif; }
+        .label { border: 2px solid #000; border-radius: 8px; padding: 1rem; max-width: 360px; margin: 1rem auto; text-align: center; page-break-after: always; }
+        .label h2 { margin: 0 0 .25rem; }
+        .label .loc { font-size: .9rem; color: #555; margin-bottom: .75rem; }
+        .label img { width: 150px; height: 150px; }
+        .label ul { text-align: left; font-size: .8rem; margin-top: .5rem; padding-left: 1.2rem; }
+        .label .foot { font-size: .65rem; color: #999; margin-top: .5rem; }
+        @media print { .no-print { display: none; } }
+      </style></head><body>
+      <div class="no-print" style="text-align:center;padding:1rem;">
+        <button onclick="window.print()" style="padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;">Print All</button>
+      </div>
+    `);
+    for (const box of boxes) {
+      const items = box.items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` (x${i.quantity})` : ""}</li>`).join("");
+      win.document.write(`
+        <div class="label">
+          <h2>${esc(box.name)}</h2>
+          ${box.location ? `<div class="loc">${esc(box.location)}</div>` : ""}
+          <img src="/api/boxes/${box.id}/qr" alt="QR">
+          ${items ? `<ul>${items}</ul>` : ""}
+          <div class="foot">Scan QR code to view contents</div>
+        </div>
+      `);
+    }
+    win.document.write("</body></html>");
+    win.document.close();
+  } catch (err) {
+    toast("Failed to generate labels: " + err.message, "error");
+  }
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────
 
 checkDeepLink();

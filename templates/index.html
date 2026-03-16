@@ -3,13 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PackTrack – Moving Inventory</title>
+  <title>PackTrack – Web Management Console</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <header class="app-header">
-    <div>
-      <h1>PackTrack <span class="subtitle">Moving Inventory</span></h1>
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <h1>PackTrack <span class="subtitle">Management Console</span></h1>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="exportInventory()" style="color:#fff;border-color:rgba(255,255,255,.3);">Export CSV</button>
+      <button class="btn btn-outline btn-sm" onclick="printAllLabels()" style="color:#fff;border-color:rgba(255,255,255,.3);">Print All Labels</button>
     </div>
   </header>
 

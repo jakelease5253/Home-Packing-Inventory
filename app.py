@@ -2,15 +2,27 @@ import io
 import base64
 import uuid
 from datetime import datetime, timezone
+from functools import wraps
 
 import qrcode
 from flask import Flask, render_template, request, jsonify, send_file
+
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///inventory.db"
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB upload limit
 db = SQLAlchemy(app)
+
+
+# ── CORS (allow iOS app to connect) ─────────────────────────────────────────
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
@@ -208,6 +220,22 @@ def delete_item(item_id):
     return jsonify({"ok": True})
 
 
+# ── Search ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/boxes/search", methods=["GET"])
+def search_boxes():
+    q = request.args.get("q", "").strip().lower()
+    if not q:
+        return get_boxes()
+    boxes = Box.query.order_by(Box.created_at.desc()).all()
+    results = []
+    for box in boxes:
+        if (q in box.name.lower() or q in box.location.lower()
+                or any(q in item.name.lower() for item in box.items)):
+            results.append(box.to_dict())
+    return jsonify(results)
+
+
 # ── QR Code ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/boxes/<box_id>/qr", methods=["GET"])
@@ -271,4 +299,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)
