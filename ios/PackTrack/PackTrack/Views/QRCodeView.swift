@@ -73,7 +73,7 @@ struct QRCodeView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
-                    if let url = api.qrCodeURL(boxId: box.id) {
+                    if api.qrCodeURL(boxId: box.id) != nil {
                         Link(destination: URL(string: api.baseURL + "/api/boxes/\(box.id)/qr-label")!) {
                             Label("Open Printable Label", systemImage: "printer")
                                 .frame(maxWidth: .infinity)

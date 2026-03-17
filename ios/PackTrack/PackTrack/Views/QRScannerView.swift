@@ -26,7 +26,7 @@ struct QRScannerView: View {
 
                 // Status bar
                 VStack(spacing: 8) {
-                    if let last = lastScanned {
+                    if lastScanned != nil {
                         Text("Scanned! Opening box...")
                             .font(.subheadline.bold())
                             .foregroundStyle(.white)
