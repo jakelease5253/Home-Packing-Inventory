@@ -12,7 +12,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Server Connection") {
+            Section {
                 TextField("Server URL", text: $serverURL)
                     .textContentType(.URL)
                     .autocapitalization(.none)
@@ -38,6 +38,8 @@ struct SettingsView: View {
                             .font(.subheadline)
                     }
                 }
+            } header: {
+                Text("Server Connection")
             } footer: {
                 Text("Enter the URL where your PackTrack server is running (e.g., http://192.168.1.100:5000).")
             }
