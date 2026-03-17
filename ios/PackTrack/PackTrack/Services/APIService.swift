@@ -144,7 +144,7 @@ class APIService: ObservableObject {
         }
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            if let http = response as? HTTPURLResponse, let errData = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            if let _ = response as? HTTPURLResponse, let errData = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let msg = errData["error"] as? String {
                 throw APIError.message(msg)
             }
