@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4A90E2"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+
+  <!-- House outline -->
+  <path d="M512 180 L820 400 L820 780 L204 780 L204 400 Z"
+        fill="none" stroke="white" stroke-width="40" stroke-linejoin="round"/>
+
+  <!-- Roof peak accent -->
+  <path d="M512 180 L820 400 L204 400 Z"
+        fill="rgba(255,255,255,0.15)"/>
+
+  <!-- Door/opening -->
+  <rect x="432" y="560" width="160" height="220" rx="12" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- Box 1 (left) -->
+  <rect x="260" y="480" width="130" height="110" rx="10" fill="white" opacity="0.95"/>
+  <line x1="260" y1="520" x2="390" y2="520" stroke="#2563EB" stroke-width="6"/>
+  <line x1="325" y1="480" x2="325" y2="520" stroke="#2563EB" stroke-width="6"/>
+
+  <!-- Box 2 (right) -->
+  <rect x="634" y="480" width="130" height="110" rx="10" fill="white" opacity="0.95"/>
+  <line x1="634" y1="520" x2="764" y2="520" stroke="#2563EB" stroke-width="6"/>
+  <line x1="699" y1="480" x2="699" y2="520" stroke="#2563EB" stroke-width="6"/>
+
+  <!-- Box 3 (center top) -->
+  <rect x="440" y="420" width="144" height="115" rx="10" fill="white" opacity="0.95"/>
+  <line x1="440" y1="462" x2="584" y2="462" stroke="#2563EB" stroke-width="6"/>
+  <line x1="512" y1="420" x2="512" y2="462" stroke="#2563EB" stroke-width="6"/>
+</svg>
