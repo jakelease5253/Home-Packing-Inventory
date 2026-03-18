@@ -517,7 +517,7 @@ with app.app_context():
 if __name__ == "__main__":
     import sys
 
-    port = 5000
+    port = 8080
     use_ngrok = False
 
     args = sys.argv[1:]
