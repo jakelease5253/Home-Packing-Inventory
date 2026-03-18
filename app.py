@@ -1,4 +1,5 @@
 import io
+import os
 import base64
 import uuid
 from datetime import datetime, timezone
@@ -475,8 +476,17 @@ if __name__ == "__main__":
 
     if use_ngrok:
         try:
-            from pyngrok import ngrok
-            public_url = ngrok.connect(port).public_url
+            from pyngrok import ngrok, conf
+            # Use custom domain if set via --domain flag or NGROK_DOMAIN env var
+            domain = os.environ.get("NGROK_DOMAIN", "packtrack.ngrok.app")
+            for arg in args:
+                if arg.startswith("--domain="):
+                    domain = arg.split("=", 1)[1]
+            options = {"addr": port, "bind_tls": True}
+            if domain:
+                options["hostname"] = domain
+            tunnel = ngrok.connect(**options)
+            public_url = tunnel.public_url
             _public_url = public_url
             print(f"\n{'='*50}")
             print(f"  Public URL: {public_url}")
