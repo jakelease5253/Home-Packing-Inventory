@@ -2,12 +2,10 @@ import Combine
 import Foundation
 import UIKit
 
-/// Centralized networking layer that talks to the PackTrack Flask backend.
 @MainActor
 class APIService: ObservableObject {
     static let shared = APIService()
 
-    /// Base URL of the Flask server. Change this to your server's address.
     @Published var baseURL: String {
         didSet { UserDefaults.standard.set(baseURL, forKey: "serverURL") }
     }
@@ -25,9 +23,26 @@ class APIService: ObservableObject {
         self.encoder = JSONEncoder()
     }
 
+    // MARK: - Rooms
+
+    func getRooms() async throws -> [Room] {
+        return try await get("/api/rooms")
+    }
+
+    func createRoom(name: String) async throws -> Room {
+        return try await post("/api/rooms", body: ["name": name])
+    }
+
+    func deleteRoom(id: Int) async throws {
+        let _: [String: Bool] = try await request("/api/rooms/\(id)", method: "DELETE")
+    }
+
     // MARK: - Boxes
 
-    func getBoxes() async throws -> [Box] {
+    func getBoxes(roomId: Int? = nil) async throws -> [Box] {
+        if let roomId = roomId {
+            return try await get("/api/boxes?room_id=\(roomId)")
+        }
         return try await get("/api/boxes")
     }
 

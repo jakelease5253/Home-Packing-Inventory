@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Label – {{ box.name }}</title>
+  <title>Label – {{ box.room.name }} {{ box.name }}</title>
   <style>
     @page { size: 4in 3in; margin: .25in; }
     body { font-family: -apple-system, sans-serif; text-align: center; padding: 1rem; }
@@ -24,8 +24,7 @@
     <button onclick="window.print()" style="padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;">Print Label</button>
   </div>
   <div class="label">
-    <h1>{{ box.name }}</h1>
-    {% if box.location %}<div class="location">{{ box.location }}</div>{% endif %}
+    <h1>{{ box.room.name }} – {{ box.name }}</h1>
     <img src="{{ base_url }}/api/boxes/{{ box.id }}/qr" alt="QR Code">
     {% if box.items %}
     <ul class="items">

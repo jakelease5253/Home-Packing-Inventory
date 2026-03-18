@@ -27,7 +27,7 @@ struct BoxDetailView: View {
                                        description: Text("This box may have been deleted."))
             }
         }
-        .navigationTitle(box?.name ?? "Box")
+        .navigationTitle(box.map { "\($0.roomName) \u{2013} \($0.name)" } ?? "Box")
         .navigationBarTitleDisplayMode(.large)
         .task { await loadBox() }
         .refreshable { await loadBox() }
@@ -116,9 +116,7 @@ struct BoxDetailView: View {
         List {
             // Box info section
             Section {
-                if !box.location.isEmpty {
-                    Label(box.location, systemImage: "mappin")
-                }
+                Label(box.roomName, systemImage: "house")
                 if !box.notes.isEmpty {
                     Label(box.notes, systemImage: "note.text")
                 }
@@ -257,26 +255,46 @@ struct EditBoxView: View {
 
     @EnvironmentObject var api: APIService
     @Environment(\.dismiss) var dismiss
-    @State private var name: String
-    @State private var location: String
     @State private var notes: String
+    @State private var rooms: [Room] = []
+    @State private var selectedRoomId: Int
 
     init(box: Box, onSave: @escaping () async -> Void) {
         self.box = box
         self.onSave = onSave
-        _name = State(initialValue: box.name)
-        _location = State(initialValue: box.location)
         _notes = State(initialValue: box.notes)
+        _selectedRoomId = State(initialValue: box.roomId)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Box Details") {
-                    TextField("Box Name", text: $name)
-                    TextField("Destination Room", text: $location)
+                Section {
+                    HStack {
+                        Text("Box")
+                        Spacer()
+                        Text(box.name)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Picker("Room", selection: $selectedRoomId) {
+                        ForEach(rooms) { room in
+                            Text(room.name).tag(room.id)
+                        }
+                    }
+                } header: {
+                    Text("Box Details")
+                } footer: {
+                    if selectedRoomId != box.roomId {
+                        Text("Moving this box will assign it a new number in the target room.")
+                    }
+                }
+
+                Section {
                     TextField("Notes", text: $notes, axis: .vertical)
                         .lineLimit(2...4)
+                } header: {
+                    Text("Notes")
                 }
             }
             .navigationTitle("Edit Box")
@@ -287,19 +305,24 @@ struct EditBoxView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
+            }
+            .task {
+                do {
+                    rooms = try await api.getRooms()
+                } catch {}
             }
         }
     }
 
     func save() {
         Task {
-            let data: [String: Any] = [
-                "name": name.trimmingCharacters(in: .whitespaces),
-                "location": location.trimmingCharacters(in: .whitespaces),
+            var data: [String: Any] = [
                 "notes": notes.trimmingCharacters(in: .whitespaces),
             ]
+            if selectedRoomId != box.roomId {
+                data["room_id"] = selectedRoomId
+            }
             _ = try? await api.updateBox(id: box.id, data: data)
             await onSave()
             dismiss()

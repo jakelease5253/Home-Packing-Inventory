@@ -30,13 +30,8 @@ struct QRCodeView: View {
 
                     // Box info summary
                     VStack(spacing: 8) {
-                        Text(box.name)
+                        Text("\(box.roomName) \u{2013} \(box.name)")
                             .font(.title3.bold())
-                        if !box.location.isEmpty {
-                            Text(box.location)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
                         Text("\(box.itemCount) item\(box.itemCount == 1 ? "" : "s")")
                             .font(.caption)
                             .foregroundStyle(.secondary)

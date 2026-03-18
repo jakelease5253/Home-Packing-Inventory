@@ -14,6 +14,14 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///inventory.db"
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB upload limit
 db = SQLAlchemy(app)
 
+# Store the public URL when ngrok is running
+_public_url = None
+
+DEFAULT_ROOMS = [
+    "Kitchen", "Living Room", "Master Bedroom", "Bathroom", "Garage",
+    "Office", "Dining Room", "Kids Room", "Guest Room", "Laundry Room",
+]
+
 
 # ── CORS (allow iOS app to connect) ─────────────────────────────────────────
 
@@ -27,20 +35,65 @@ def add_cors_headers(response):
 
 # ── Models ───────────────────────────────────────────────────────────────────
 
+class Room(db.Model):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    is_custom = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    boxes = db.relationship("Box", backref="room", lazy=True)
+
+    def to_dict(self):
+        box_numbers = sorted([b.number for b in self.boxes])
+        return {
+            "id": self.id,
+            "name": self.name,
+            "is_custom": self.is_custom,
+            "box_count": len(self.boxes),
+            "item_count": sum(len(b.items) for b in self.boxes),
+            "sealed_count": sum(1 for b in self.boxes if b.sealed),
+            "box_numbers": box_numbers,
+            "box_numbers_display": _format_number_ranges(box_numbers),
+        }
+
+
+def _format_number_ranges(numbers):
+    """Format a list of numbers into ranges like '1-3 & 5-7'."""
+    if not numbers:
+        return ""
+    ranges = []
+    start = numbers[0]
+    end = numbers[0]
+    for n in numbers[1:]:
+        if n == end + 1:
+            end = n
+        else:
+            ranges.append(f"{start}" if start == end else f"{start}-{end}")
+            start = end = n
+    ranges.append(f"{start}" if start == end else f"{start}-{end}")
+    return " & ".join(ranges)
+
+
 class Box(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    number = db.Column(db.Integer, nullable=False)
     name = db.Column(db.String(120), nullable=False)
+    room_id = db.Column(db.Integer, db.ForeignKey("room.id"), nullable=False)
     location = db.Column(db.String(120), default="")
     notes = db.Column(db.Text, default="")
     sealed = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     items = db.relationship("Item", backref="box", cascade="all, delete-orphan", lazy=True)
 
+    __table_args__ = (db.UniqueConstraint("room_id", "number", name="uq_room_number"),)
+
     def to_dict(self):
         return {
             "id": self.id,
+            "number": self.number,
             "name": self.name,
-            "location": self.location,
+            "room_id": self.room_id,
+            "room_name": self.room.name if self.room else "",
+            "location": self.room.name if self.room else self.location,
             "notes": self.notes,
             "sealed": self.sealed,
             "created_at": self.created_at.isoformat(),
@@ -67,6 +120,20 @@ class Item(db.Model):
         }
 
 
+def _next_box_number(room_id):
+    """Find the lowest available box number for a room (fills gaps first)."""
+    existing = sorted(
+        b.number for b in Box.query.filter_by(room_id=room_id).all()
+    )
+    # Find first gap
+    expected = 1
+    for n in existing:
+        if n != expected:
+            return expected
+        expected += 1
+    return expected
+
+
 # ── Pages ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -74,18 +141,71 @@ def index():
     return render_template("index.html")
 
 
+# ── Room API ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/rooms", methods=["GET"])
+def get_rooms():
+    rooms = Room.query.order_by(Room.is_custom, Room.name).all()
+    return jsonify([r.to_dict() for r in rooms])
+
+
+@app.route("/api/rooms", methods=["POST"])
+def create_room():
+    data = request.json
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Room name is required"}), 400
+    existing = Room.query.filter(db.func.lower(Room.name) == name.lower()).first()
+    if existing:
+        return jsonify({"error": "A room with that name already exists"}), 400
+    room = Room(name=name, is_custom=True)
+    db.session.add(room)
+    db.session.commit()
+    return jsonify(room.to_dict()), 201
+
+
+@app.route("/api/rooms/<int:room_id>", methods=["DELETE"])
+def delete_room(room_id):
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"error": "Room not found"}), 404
+    if room.boxes:
+        return jsonify({"error": "Cannot delete a room that has boxes. Delete or move the boxes first."}), 400
+    db.session.delete(room)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 # ── Box API ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/boxes", methods=["GET"])
 def get_boxes():
-    boxes = Box.query.order_by(Box.created_at.desc()).all()
+    room_id = request.args.get("room_id")
+    query = Box.query
+    if room_id:
+        query = query.filter_by(room_id=int(room_id))
+    boxes = query.order_by(Box.room_id, Box.number).all()
     return jsonify([b.to_dict() for b in boxes])
 
 
 @app.route("/api/boxes", methods=["POST"])
 def create_box():
     data = request.json
-    box = Box(name=data["name"], location=data.get("location", ""), notes=data.get("notes", ""))
+    room_id = data.get("room_id")
+    if not room_id:
+        return jsonify({"error": "room_id is required"}), 400
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"error": "Room not found"}), 404
+    number = _next_box_number(room_id)
+    name = f"Box {number}"
+    box = Box(
+        room_id=room_id,
+        number=number,
+        name=name,
+        location=room.name,
+        notes=data.get("notes", ""),
+    )
     db.session.add(box)
     db.session.commit()
     return jsonify(box.to_dict()), 201
@@ -105,10 +225,14 @@ def update_box(box_id):
     if not box:
         return jsonify({"error": "Box not found"}), 404
     data = request.json
-    if "name" in data:
-        box.name = data["name"]
-    if "location" in data:
-        box.location = data["location"]
+    if "room_id" in data:
+        new_room = db.session.get(Room, data["room_id"])
+        if not new_room:
+            return jsonify({"error": "Room not found"}), 404
+        box.room_id = new_room.id
+        box.number = _next_box_number(new_room.id)
+        box.name = f"Box {box.number}"
+        box.location = new_room.name
     if "notes" in data:
         box.notes = data["notes"]
     if "sealed" in data:
@@ -227,10 +351,11 @@ def search_boxes():
     q = request.args.get("q", "").strip().lower()
     if not q:
         return get_boxes()
-    boxes = Box.query.order_by(Box.created_at.desc()).all()
+    boxes = Box.query.order_by(Box.room_id, Box.number).all()
     results = []
     for box in boxes:
-        if (q in box.name.lower() or q in box.location.lower()
+        room_name = box.room.name.lower() if box.room else ""
+        if (q in box.name.lower() or q in room_name
                 or any(q in item.name.lower() for item in box.items)):
             results.append(box.to_dict())
     return jsonify(results)
@@ -244,7 +369,6 @@ def box_qr(box_id):
     if not box:
         return jsonify({"error": "Box not found"}), 404
 
-    # QR data: a URL that opens the box detail view
     base_url = request.host_url.rstrip("/")
     qr_data = f"{base_url}/?box={box_id}"
 
@@ -256,12 +380,12 @@ def box_qr(box_id):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return send_file(buf, mimetype="image/png", download_name=f"box-{box.name}.png")
+    room_name = box.room.name if box.room else "box"
+    return send_file(buf, mimetype="image/png", download_name=f"{room_name}-box-{box.number}.png")
 
 
 @app.route("/api/boxes/<box_id>/qr-label", methods=["GET"])
 def box_qr_label(box_id):
-    """Return a printable HTML label with QR code, box name, and item summary."""
     box = db.session.get(Box, box_id)
     if not box:
         return jsonify({"error": "Box not found"}), 404
@@ -272,20 +396,13 @@ def box_qr_label(box_id):
 
 @app.route("/api/analyze-photo", methods=["POST"])
 def analyze_photo():
-    """Accept an image and return detected items.
-
-    In production this would call a vision AI model. For now it returns a
-    helpful prompt so the user can manually enter items detected in the photo.
-    """
     if "photo" not in request.files:
         return jsonify({"error": "No photo uploaded"}), 400
 
-    # Read and encode the photo for potential future AI integration
     photo = request.files["photo"]
     photo_bytes = photo.read()
     photo_b64 = base64.b64encode(photo_bytes).decode()
 
-    # Return the photo back so the UI can display it for manual item entry
     return jsonify({
         "message": "Photo received. Please review and confirm the items below.",
         "photo_preview": f"data:{photo.content_type};base64,{photo_b64}",
@@ -293,12 +410,82 @@ def analyze_photo():
     })
 
 
+# ── Server Info ──────────────────────────────────────────────────────────────
+
+@app.route("/api/server-info", methods=["GET"])
+def server_info():
+    return jsonify({"public_url": _public_url})
+
+
 # ── Bootstrap ────────────────────────────────────────────────────────────────
+
+def _seed_rooms():
+    """Seed default rooms if the Room table is empty."""
+    if Room.query.count() == 0:
+        for name in DEFAULT_ROOMS:
+            db.session.add(Room(name=name, is_custom=False))
+        db.session.commit()
+
+
+def _migrate_existing_boxes():
+    """Migrate any existing boxes that lack a room_id."""
+    orphan_boxes = Box.query.filter(
+        db.or_(Box.room_id.is_(None), Box.number.is_(None))
+    ).all()
+    if not orphan_boxes:
+        return
+
+    for box in orphan_boxes:
+        # Try to find or create a room matching the box's location
+        room_name = box.location.strip() if box.location else "Uncategorized"
+        if not room_name:
+            room_name = "Uncategorized"
+        room = Room.query.filter(db.func.lower(Room.name) == room_name.lower()).first()
+        if not room:
+            room = Room(name=room_name, is_custom=True)
+            db.session.add(room)
+            db.session.flush()
+        box.room_id = room.id
+        box.number = _next_box_number(room.id)
+        box.name = f"Box {box.number}"
+        box.location = room.name
+    db.session.commit()
+
 
 with app.app_context():
     db.create_all()
+    _seed_rooms()
+    _migrate_existing_boxes()
 
 if __name__ == "__main__":
     import sys
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+
+    port = 5000
+    use_ngrok = False
+
+    args = sys.argv[1:]
+    for arg in args:
+        if arg == "--public":
+            use_ngrok = True
+        else:
+            try:
+                port = int(arg)
+            except ValueError:
+                pass
+
+    if use_ngrok:
+        try:
+            from pyngrok import ngrok
+            public_url = ngrok.connect(port).public_url
+            _public_url = public_url
+            print(f"\n{'='*50}")
+            print(f"  Public URL: {public_url}")
+            print(f"  Enter this URL in PackTrack app Settings")
+            print(f"{'='*50}\n")
+        except ImportError:
+            print("pyngrok not installed. Run: pip install pyngrok")
+            print("Then run: ngrok config add-authtoken <your-token>")
+            print("Get a free token at https://dashboard.ngrok.com/signup")
+            sys.exit(1)
+
     app.run(debug=True, host="0.0.0.0", port=port)

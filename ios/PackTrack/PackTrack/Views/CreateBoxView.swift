@@ -5,22 +5,48 @@ struct CreateBoxView: View {
 
     @EnvironmentObject var api: APIService
     @Environment(\.dismiss) var dismiss
-    @State private var name = ""
-    @State private var location = ""
+    @State private var rooms: [Room] = []
+    @State private var selectedRoomId: Int?
     @State private var notes = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
-    @FocusState private var nameFieldFocused: Bool
+    @State private var showAddRoom = false
+    @State private var customRoomName = ""
+    @State private var nextBoxNumber: Int?
+
+    var selectedRoom: Room? {
+        rooms.first(where: { $0.id == selectedRoomId })
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Box Details") {
-                    TextField("Box Name", text: $name)
-                        .focused($nameFieldFocused)
-                    TextField("Destination Room", text: $location)
-                    TextField("Notes", text: $notes, axis: .vertical)
+                Section {
+                    Picker("Room", selection: $selectedRoomId) {
+                        Text("Select a room").tag(nil as Int?)
+                        ForEach(rooms) { room in
+                            Text(room.name).tag(room.id as Int?)
+                        }
+                    }
+
+                    Button("Add Custom Room...") {
+                        showAddRoom = true
+                    }
+                    .font(.subheadline)
+                } header: {
+                    Text("Room")
+                } footer: {
+                    if let room = selectedRoom {
+                        let num = (room.boxNumbers.last ?? 0) + 1
+                        Text("This will create Box \(num) in \(room.name)")
+                    }
+                }
+
+                Section {
+                    TextField("Notes (optional)", text: $notes, axis: .vertical)
                         .lineLimit(2...4)
+                } header: {
+                    Text("Details")
                 }
 
                 if let errorMessage {
@@ -39,20 +65,35 @@ struct CreateBoxView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") { createBox() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                        .disabled(selectedRoomId == nil || isSaving)
                 }
             }
-            .onAppear { nameFieldFocused = true }
+            .task { await loadRooms() }
+            .alert("Add Custom Room", isPresented: $showAddRoom) {
+                TextField("Room name", text: $customRoomName)
+                Button("Add") { addCustomRoom() }
+                Button("Cancel", role: .cancel) { customRoomName = "" }
+            } message: {
+                Text("Enter a name for the custom room.")
+            }
+        }
+    }
+
+    func loadRooms() async {
+        do {
+            rooms = try await api.getRooms()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
     func createBox() {
+        guard let roomId = selectedRoomId else { return }
         isSaving = true
         Task {
             do {
                 let box = try await api.createBox(BoxCreate(
-                    name: name.trimmingCharacters(in: .whitespaces),
-                    location: location.trimmingCharacters(in: .whitespaces),
+                    roomId: roomId,
                     notes: notes.trimmingCharacters(in: .whitespaces)
                 ))
                 onCreate?(box)
@@ -60,6 +101,21 @@ struct CreateBoxView: View {
             } catch {
                 errorMessage = error.localizedDescription
                 isSaving = false
+            }
+        }
+    }
+
+    func addCustomRoom() {
+        let name = customRoomName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        Task {
+            do {
+                let room = try await api.createRoom(name: name)
+                rooms.append(room)
+                selectedRoomId = room.id
+                customRoomName = ""
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }

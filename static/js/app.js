@@ -39,6 +39,7 @@ function toast(msg, type = "info") {
 function navigate(view, params = {}) {
   window.__params = params;
   if (view === "dashboard") renderDashboard();
+  else if (view === "room") renderRoomDetail(params.id);
   else if (view === "box") renderBoxDetail(params.id);
 }
 
@@ -56,14 +57,20 @@ function checkDeepLink() {
 // ── Dashboard ────────────────────────────────────────────────────────────
 
 async function renderDashboard() {
-  const boxes = await api("/boxes");
-  const totalItems = boxes.reduce((s, b) => s + b.item_count, 0);
-  const sealedCount = boxes.filter(b => b.sealed).length;
+  const rooms = await api("/rooms");
+  const totalBoxes = rooms.reduce((s, r) => s + r.box_count, 0);
+  const totalItems = rooms.reduce((s, r) => s + r.item_count, 0);
+  const totalSealed = rooms.reduce((s, r) => s + r.sealed_count, 0);
+  const roomsWithBoxes = rooms.filter(r => r.box_count > 0);
 
   app.innerHTML = `
     <div class="stats">
       <div class="stat-card">
-        <div class="number">${boxes.length}</div>
+        <div class="number">${rooms.length}</div>
+        <div class="label">Rooms</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${totalBoxes}</div>
         <div class="label">Total Boxes</div>
       </div>
       <div class="stat-card">
@@ -71,30 +78,26 @@ async function renderDashboard() {
         <div class="label">Total Items</div>
       </div>
       <div class="stat-card">
-        <div class="number">${sealedCount}</div>
+        <div class="number">${totalSealed}</div>
         <div class="label">Sealed</div>
-      </div>
-      <div class="stat-card">
-        <div class="number">${boxes.length - sealedCount}</div>
-        <div class="label">Open</div>
       </div>
     </div>
 
     <div class="dashboard-header">
       <div class="search-bar" style="flex:1;max-width:400px;">
         <span class="search-icon">&#128269;</span>
-        <input type="text" id="searchInput" placeholder="Search boxes or items...">
+        <input type="text" id="searchInput" placeholder="Search rooms...">
       </div>
       <button class="btn btn-primary" onclick="showCreateBoxModal()">+ New Box</button>
     </div>
 
     <div class="box-grid" id="boxGrid">
-      ${boxes.length === 0 ? `
+      ${roomsWithBoxes.length === 0 ? `
         <div class="empty-state" style="grid-column:1/-1;">
-          <div class="icon">&#128230;</div>
-          <p>No boxes yet. Create your first box to start packing!</p>
+          <div class="icon">&#127968;</div>
+          <p>No rooms with boxes yet. Create your first box to start packing!</p>
         </div>
-      ` : boxes.map(b => boxCard(b)).join("")}
+      ` : roomsWithBoxes.map(r => roomCard(r)).join("")}
     </div>
   `;
 
@@ -111,6 +114,95 @@ async function renderDashboard() {
   }
 }
 
+function roomCard(room) {
+  const sealedText = room.sealed_count === room.box_count && room.box_count > 0
+    ? "All Sealed"
+    : room.sealed_count > 0
+    ? `${room.sealed_count}/${room.box_count} Sealed`
+    : "Open";
+  const badgeClass = room.sealed_count === room.box_count && room.box_count > 0
+    ? "badge-sealed"
+    : "badge-open";
+
+  return `
+    <div class="card box-card" onclick="navigate('room',{id:${room.id}})">
+      <div class="card-body">
+        <div class="box-header">
+          <div>
+            <div class="box-name">${esc(room.name)}</div>
+            <div class="box-location">${room.box_count} box${room.box_count !== 1 ? "es" : ""} &middot; ${room.item_count} item${room.item_count !== 1 ? "s" : ""}</div>
+          </div>
+          <span class="badge ${badgeClass}">${sealedText}</span>
+        </div>
+        ${room.box_numbers_display ? `<div style="font-size:.85rem;color:var(--text-light);margin-top:.5rem;">Boxes: ${esc(room.box_numbers_display)}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+// ── Room Detail ──────────────────────────────────────────────────────────
+
+async function renderRoomDetail(roomId) {
+  const boxes = await api(`/boxes?room_id=${roomId}`);
+  const rooms = await api("/rooms");
+  const room = rooms.find(r => r.id === roomId);
+  const roomName = room ? room.name : "Room";
+  const totalItems = boxes.reduce((s, b) => s + b.item_count, 0);
+  const sealedCount = boxes.filter(b => b.sealed).length;
+
+  app.innerHTML = `
+    <a class="back-link" onclick="navigate('dashboard')">&#8592; All Rooms</a>
+
+    <h2 style="margin:.5rem 0 1rem;">${esc(roomName)}</h2>
+
+    <div class="stats">
+      <div class="stat-card">
+        <div class="number">${boxes.length}</div>
+        <div class="label">Boxes</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${totalItems}</div>
+        <div class="label">Items</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${sealedCount}</div>
+        <div class="label">Sealed</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${boxes.length - sealedCount}</div>
+        <div class="label">Open</div>
+      </div>
+    </div>
+
+    <div class="dashboard-header">
+      <div></div>
+      <button class="btn btn-primary" onclick="createBoxInRoom(${roomId})">+ Add Box</button>
+    </div>
+
+    <div class="box-grid" id="boxGrid">
+      ${boxes.length === 0 ? `
+        <div class="empty-state" style="grid-column:1/-1;">
+          <div class="icon">&#128230;</div>
+          <p>No boxes in this room yet.</p>
+        </div>
+      ` : boxes.map(b => boxCard(b)).join("")}
+    </div>
+  `;
+}
+
+async function createBoxInRoom(roomId) {
+  try {
+    const box = await api("/boxes", {
+      method: "POST",
+      body: { room_id: roomId },
+    });
+    toast("Box created!", "success");
+    navigate("box", { id: box.id });
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
 function boxCard(box) {
   const itemPreview = box.items.slice(0, 3).map(i => i.name).join(", ");
   const moreCount = box.items.length > 3 ? ` +${box.items.length - 3} more` : "";
@@ -120,7 +212,7 @@ function boxCard(box) {
         <div class="box-header">
           <div>
             <div class="box-name">${esc(box.name)}</div>
-            ${box.location ? `<div class="box-location">${esc(box.location)}</div>` : ""}
+            ${box.notes ? `<div class="box-location">${esc(box.notes)}</div>` : ""}
           </div>
           <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span>
         </div>
@@ -135,7 +227,15 @@ function boxCard(box) {
 
 // ── Create Box Modal ─────────────────────────────────────────────────────
 
-function showCreateBoxModal() {
+async function showCreateBoxModal() {
+  let rooms;
+  try {
+    rooms = await api("/rooms");
+  } catch (err) {
+    toast("Failed to load rooms: " + err.message, "error");
+    return;
+  }
+
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
@@ -147,12 +247,19 @@ function showCreateBoxModal() {
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label>Box Name *</label>
-          <input class="form-control" id="newBoxName" placeholder="e.g. Kitchen - Plates" autofocus>
+          <label>Room *</label>
+          <select class="form-control" id="newBoxRoom">
+            <option value="">Select a room...</option>
+            ${rooms.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join("")}
+          </select>
         </div>
+        <div id="boxNumberPreview" style="font-size:.85rem;color:var(--text-light);margin-bottom:.75rem;"></div>
         <div class="form-group">
-          <label>Destination Room</label>
-          <input class="form-control" id="newBoxLocation" placeholder="e.g. Kitchen, Bedroom">
+          <label>Add Custom Room</label>
+          <div style="display:flex;gap:.5rem;">
+            <input class="form-control" id="customRoomName" placeholder="e.g. Attic, Basement">
+            <button class="btn btn-outline" id="addCustomRoomBtn">Add</button>
+          </div>
         </div>
         <div class="form-group">
           <label>Notes</label>
@@ -167,8 +274,39 @@ function showCreateBoxModal() {
   `;
   document.body.appendChild(overlay);
 
-  // Focus the name input
-  setTimeout(() => $("#newBoxName").focus(), 100);
+  // Update preview when room changes
+  const roomSelect = $("#newBoxRoom");
+  roomSelect.addEventListener("change", () => {
+    const roomId = parseInt(roomSelect.value);
+    const room = rooms.find(r => r.id === roomId);
+    const preview = $("#boxNumberPreview");
+    if (room) {
+      const nextNum = (room.box_numbers.length > 0 ? Math.max(...room.box_numbers) + 1 : 1);
+      preview.textContent = `This will create Box ${nextNum} in ${room.name}`;
+    } else {
+      preview.textContent = "";
+    }
+  });
+
+  // Add custom room
+  $("#addCustomRoomBtn").onclick = async () => {
+    const name = $("#customRoomName").value.trim();
+    if (!name) { toast("Enter a room name", "error"); return; }
+    try {
+      const room = await api("/rooms", { method: "POST", body: { name } });
+      rooms.push(room);
+      const opt = document.createElement("option");
+      opt.value = room.id;
+      opt.textContent = room.name;
+      roomSelect.appendChild(opt);
+      roomSelect.value = room.id;
+      roomSelect.dispatchEvent(new Event("change"));
+      $("#customRoomName").value = "";
+      toast("Room added!", "success");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  };
 
   // Handle enter key
   overlay.addEventListener("keydown", e => {
@@ -176,12 +314,12 @@ function showCreateBoxModal() {
   });
 
   $("#createBoxBtn").onclick = async () => {
-    const name = $("#newBoxName").value.trim();
-    if (!name) { toast("Please enter a box name", "error"); return; }
+    const roomId = parseInt(roomSelect.value);
+    if (!roomId) { toast("Please select a room", "error"); return; }
     try {
       const box = await api("/boxes", {
         method: "POST",
-        body: { name, location: $("#newBoxLocation").value.trim(), notes: $("#newBoxNotes").value.trim() },
+        body: { room_id: roomId, notes: $("#newBoxNotes").value.trim() },
       });
       overlay.remove();
       toast("Box created!", "success");
@@ -205,12 +343,11 @@ async function renderBoxDetail(boxId) {
   }
 
   app.innerHTML = `
-    <a class="back-link" onclick="navigate('dashboard')">&#8592; All Boxes</a>
+    <a class="back-link" onclick="navigate('room',{id:${box.room_id}})">&#8592; ${esc(box.room_name)}</a>
 
     <div class="detail-header">
       <div>
-        <div class="detail-title">${esc(box.name)} <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span></div>
-        ${box.location ? `<div style="color:var(--text-light);">${esc(box.location)}</div>` : ""}
+        <div class="detail-title">${esc(box.room_name)} &ndash; ${esc(box.name)} <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span></div>
         ${box.notes ? `<div style="color:var(--text-light);font-size:.85rem;margin-top:.25rem;">${esc(box.notes)}</div>` : ""}
       </div>
       <div class="detail-actions">
@@ -220,7 +357,7 @@ async function renderBoxDetail(boxId) {
              <button class="btn btn-accent btn-sm" onclick="sealBox('${box.id}')">Seal Box</button>`
           : `<button class="btn btn-outline btn-sm" onclick="unsealBox('${box.id}')">Unseal</button>`
         }
-        <button class="btn btn-danger btn-sm" onclick="deleteBox('${box.id}')">Delete</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBox('${box.id}',${box.room_id})">Delete</button>
       </div>
     </div>
 
@@ -374,12 +511,16 @@ async function unsealBox(boxId) {
   }
 }
 
-async function deleteBox(boxId) {
+async function deleteBox(boxId, roomId) {
   if (!confirm("Delete this box and all its items? This cannot be undone.")) return;
   try {
     await api(`/boxes/${boxId}`, { method: "DELETE" });
     toast("Box deleted", "success");
-    navigate("dashboard");
+    if (roomId) {
+      navigate("room", { id: roomId });
+    } else {
+      navigate("dashboard");
+    }
   } catch (err) {
     toast(err.message, "error");
   }
@@ -461,7 +602,6 @@ function showPhotoModal(boxId) {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Show preview
     const reader = new FileReader();
     reader.onload = (ev) => {
       photoPreview.src = ev.target.result;
@@ -470,10 +610,8 @@ function showPhotoModal(boxId) {
     };
     reader.readAsDataURL(file);
 
-    // Upload for analysis
     try {
       const result = await apiUpload("/analyze-photo", file);
-      // Show item editor with detected items (or empty for manual entry)
       itemEditor.style.display = "block";
       photoFooter.style.display = "flex";
 
@@ -483,7 +621,6 @@ function showPhotoModal(boxId) {
       if (result.detected_items && result.detected_items.length > 0) {
         result.detected_items.forEach(item => addBulkItemRow(item.name));
       } else {
-        // Start with 3 empty rows for manual entry
         for (let i = 0; i < 3; i++) addBulkItemRow();
       }
     } catch (err) {
@@ -522,7 +659,6 @@ function addBulkItemRow(value = "") {
     <button class="btn btn-icon btn-sm btn-outline" onclick="this.parentElement.remove()" title="Remove">&times;</button>
   `;
   list.appendChild(row);
-  // Focus the new input
   const input = row.querySelector("input");
   if (!value) input.focus();
 }
@@ -540,13 +676,13 @@ function esc(str) {
 async function exportInventory() {
   try {
     const boxes = await api("/boxes");
-    const rows = [["Box Name", "Destination Room", "Status", "Notes", "Item Name", "Quantity", "Category"]];
+    const rows = [["Room", "Box", "Status", "Notes", "Item Name", "Quantity", "Category"]];
     for (const box of boxes) {
       if (box.items.length === 0) {
-        rows.push([box.name, box.location, box.sealed ? "Sealed" : "Open", box.notes, "", "", ""]);
+        rows.push([box.room_name, box.name, box.sealed ? "Sealed" : "Open", box.notes, "", "", ""]);
       } else {
         for (const item of box.items) {
-          rows.push([box.name, box.location, box.sealed ? "Sealed" : "Open", box.notes, item.name, item.quantity, item.category]);
+          rows.push([box.room_name, box.name, box.sealed ? "Sealed" : "Open", box.notes, item.name, item.quantity, item.category]);
         }
       }
     }
@@ -569,7 +705,6 @@ async function printAllLabels() {
   try {
     const boxes = await api("/boxes");
     if (boxes.length === 0) { toast("No boxes to print", "error"); return; }
-    // Open a new window with all labels
     const win = window.open("", "_blank");
     win.document.write(`
       <!DOCTYPE html><html><head><title>All Labels</title>
@@ -591,8 +726,7 @@ async function printAllLabels() {
       const items = box.items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` (x${i.quantity})` : ""}</li>`).join("");
       win.document.write(`
         <div class="label">
-          <h2>${esc(box.name)}</h2>
-          ${box.location ? `<div class="loc">${esc(box.location)}</div>` : ""}
+          <h2>${esc(box.room_name)} &ndash; ${esc(box.name)}</h2>
           <img src="/api/boxes/${box.id}/qr" alt="QR">
           ${items ? `<ul>${items}</ul>` : ""}
           <div class="foot">Scan QR code to view contents</div>
