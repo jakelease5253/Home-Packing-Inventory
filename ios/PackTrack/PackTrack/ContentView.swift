@@ -26,7 +26,7 @@ struct ContentView: View {
                 Label("Settings", systemImage: "gear")
             }
         }
-        .tint(Color("AccentColor"))
+        .tint(Color(.systemBlue))
         .onOpenURL { url in
             // Handle deep links from QR codes: packtrack://box/<id> or http://host/?box=<id>
             if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),

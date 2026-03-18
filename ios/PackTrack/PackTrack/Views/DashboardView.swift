@@ -123,7 +123,7 @@ struct StatCard: View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.title2.bold())
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color(.systemBlue))
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
