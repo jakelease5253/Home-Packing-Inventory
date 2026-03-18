@@ -474,10 +474,11 @@ if __name__ == "__main__":
             except ValueError:
                 pass
 
-    if use_ngrok:
+    if use_ngrok and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         try:
-            from pyngrok import ngrok, conf
-            # Use custom domain if set via --domain flag or NGROK_DOMAIN env var
+            from pyngrok import ngrok
+            # Kill any leftover ngrok processes first
+            ngrok.kill()
             domain = os.environ.get("NGROK_DOMAIN", "packtrack.ngrok.app")
             for arg in args:
                 if arg.startswith("--domain="):
