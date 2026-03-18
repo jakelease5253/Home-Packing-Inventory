@@ -66,7 +66,7 @@ async function renderDashboard() {
   app.innerHTML = `
     <div class="stats">
       <div class="stat-card">
-        <div class="number">${rooms.length}</div>
+        <div class="number">${roomsWithBoxes.length}</div>
         <div class="label">Rooms</div>
       </div>
       <div class="stat-card">

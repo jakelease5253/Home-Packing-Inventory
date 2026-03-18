@@ -18,7 +18,7 @@ struct DashboardView: View {
             VStack(spacing: 16) {
                 // Stats row
                 HStack(spacing: 12) {
-                    StatCard(value: "\(rooms.count)", label: "Rooms", color: .blue)
+                    StatCard(value: "\(roomsWithBoxes.count)", label: "Rooms", color: .blue)
                     StatCard(value: "\(totalBoxes)", label: "Boxes", color: .orange)
                     StatCard(value: "\(totalItems)", label: "Items", color: .green)
                     StatCard(value: "\(totalSealed)", label: "Sealed", color: .purple)
