@@ -393,7 +393,57 @@ def box_qr_label(box_id):
     return render_template("label.html", box=box, base_url=request.host_url.rstrip("/"))
 
 
-# ── Photo analysis stub ─────────────────────────────────────────────────────
+# ── Photo analysis via Claude Vision ────────────────────────────────────────
+
+def _analyze_image_with_claude(image_b64: str, media_type: str) -> list[dict]:
+    """Use Claude Vision API to detect items in a photo."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return []
+
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "You are helping someone catalog items for a moving inventory. "
+                            "Look at this photo and list every distinct item you can see. "
+                            "Return ONLY a JSON array of strings, where each string is a "
+                            "short item name (e.g. [\"Blue lamp\", \"Cardboard box\", \"Winter jacket\"]). "
+                            "Be specific but concise. Do not include any other text, just the JSON array."
+                        ),
+                    },
+                ],
+            }
+        ],
+    )
+
+    import json
+
+    text = message.content[0].text.strip()
+    # Handle cases where the model wraps JSON in markdown code fences
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        text = text.rsplit("```", 1)[0].strip()
+    items = json.loads(text)
+    return [{"name": name} for name in items if isinstance(name, str)]
+
 
 @app.route("/api/analyze-photo", methods=["POST"])
 def analyze_photo():
@@ -401,13 +451,19 @@ def analyze_photo():
         return jsonify({"error": "No photo uploaded"}), 400
 
     photo = request.files["photo"]
+    media_type = photo.content_type or "image/jpeg"
     photo_bytes = photo.read()
     photo_b64 = base64.b64encode(photo_bytes).decode()
 
+    try:
+        detected = _analyze_image_with_claude(photo_b64, media_type)
+    except Exception:
+        detected = []
+
     return jsonify({
         "message": "Photo received. Please review and confirm the items below.",
-        "photo_preview": f"data:{photo.content_type};base64,{photo_b64}",
-        "detected_items": [],
+        "photo_preview": f"data:{media_type};base64,{photo_b64}",
+        "detected_items": detected,
     })
 
 
