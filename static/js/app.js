@@ -385,7 +385,7 @@ async function renderBoxDetail(boxId) {
                 </div>
                 ${!box.sealed ? `
                   <div class="item-actions">
-                    <button class="btn btn-outline btn-icon btn-sm" onclick="editItem(${item.id},'${esc(item.name)}',${item.quantity},'${esc(item.category)}','${box.id}')" title="Edit">&#9998;</button>
+                    <button class="btn btn-outline btn-icon btn-sm edit-item-btn" data-item-id="${item.id}" data-item-name="${esc(item.name)}" data-item-qty="${item.quantity}" data-item-cat="${esc(item.category)}" data-box-id="${box.id}" title="Edit">&#9998;</button>
                     <button class="btn btn-outline btn-icon btn-sm" onclick="deleteItem(${item.id},'${box.id}')" title="Delete">&times;</button>
                   </div>
                 ` : ""}
@@ -412,6 +412,20 @@ async function renderBoxDetail(boxId) {
       if (e.key === "Enter") addItem(box.id);
     });
   }
+
+  // Attach edit item handlers (using data attributes to avoid quote escaping issues)
+  $$(".edit-item-btn").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      editItem(
+        parseInt(btn.dataset.itemId),
+        btn.dataset.itemName,
+        parseInt(btn.dataset.itemQty),
+        btn.dataset.itemCat,
+        btn.dataset.boxId
+      );
+    });
+  });
 }
 
 // ── Item CRUD ────────────────────────────────────────────────────────────
@@ -844,6 +858,8 @@ function labelSelectNext() {
 
 // Step 2: Choose starting position on the Avery sheet
 function showLabelPositionModal(boxes) {
+  const copies = 2;
+  const totalLabels = boxes.length * copies;
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
@@ -857,9 +873,13 @@ function showLabelPositionModal(boxes) {
         <p style="font-size:.85rem;color:var(--text-light);margin-bottom:1rem;">
           Select the starting position on the label sheet. Labels will fill left-to-right, top-to-bottom from your selection. This lets you reuse partially-used sheets.
         </p>
-        <p style="font-size:.8rem;margin-bottom:.75rem;font-weight:600;">
-          ${boxes.length} label${boxes.length !== 1 ? "s" : ""} to print &bull;
-          ${Math.ceil(boxes.length / 6)} sheet${Math.ceil(boxes.length / 6) !== 1 ? "s" : ""} needed from position 1
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;">
+          <label style="font-size:.8rem;font-weight:600;white-space:nowrap;">Copies per box:</label>
+          <input type="number" id="labelCopies" class="form-control" min="1" max="10" value="${copies}" style="max-width:70px;" onchange="updateLabelSheetCalc()" oninput="updateLabelSheetCalc()">
+        </div>
+        <p style="font-size:.8rem;margin-bottom:.75rem;font-weight:600;" id="labelTotalInfo">
+          ${boxes.length} box${boxes.length !== 1 ? "es" : ""} &times; ${copies} = ${totalLabels} label${totalLabels !== 1 ? "s" : ""} &bull;
+          ${Math.ceil(totalLabels / 6)} sheet${Math.ceil(totalLabels / 6) !== 1 ? "s" : ""} needed from position 1
         </p>
         <div class="avery-sheet" id="averySheet">
           ${[0,1,2,3,4,5].map(i => {
@@ -870,7 +890,7 @@ function showLabelPositionModal(boxes) {
           }).join("")}
         </div>
         <p style="font-size:.8rem;color:var(--text-light);margin-top:.75rem;" id="sheetCalc">
-          Starting at position 1 &rarr; ${Math.ceil(boxes.length / 6)} sheet${Math.ceil(boxes.length / 6) !== 1 ? "s" : ""}
+          Starting at position 1 &rarr; ${Math.ceil(totalLabels / 6)} sheet${Math.ceil(totalLabels / 6) !== 1 ? "s" : ""}
         </p>
       </div>
       <div class="modal-footer">
@@ -884,6 +904,21 @@ function showLabelPositionModal(boxes) {
   window.__averyStart = 0;
 }
 
+function updateLabelSheetCalc() {
+  const copies = Math.max(1, parseInt(document.getElementById("labelCopies").value) || 1);
+  const boxes = window.__averyBoxes;
+  const totalLabels = boxes.length * copies;
+  const pos = window.__averyStart;
+  const labelsOnFirstSheet = 6 - pos;
+  const remaining = Math.max(0, totalLabels - labelsOnFirstSheet);
+  const sheets = 1 + Math.ceil(remaining / 6);
+  const totalSheets = totalLabels <= labelsOnFirstSheet ? 1 : sheets;
+  document.getElementById("labelTotalInfo").innerHTML =
+    `${boxes.length} box${boxes.length !== 1 ? "es" : ""} &times; ${copies} = ${totalLabels} label${totalLabels !== 1 ? "s" : ""} &bull; ${totalSheets} sheet${totalSheets !== 1 ? "s" : ""} needed from position ${pos + 1}`;
+  document.getElementById("sheetCalc").innerHTML =
+    `Starting at position ${pos + 1} &rarr; ${totalSheets} sheet${totalSheets !== 1 ? "s" : ""}`;
+}
+
 function selectAveryStart(pos) {
   window.__averyStart = pos;
   const cells = document.querySelectorAll(".avery-cell");
@@ -891,18 +926,13 @@ function selectAveryStart(pos) {
     c.classList.toggle("selected", i === pos);
     c.classList.toggle("skipped", i < pos);
   });
-  const boxes = window.__averyBoxes;
-  const labelsOnFirstSheet = 6 - pos;
-  const remaining = Math.max(0, boxes.length - labelsOnFirstSheet);
-  const sheets = 1 + Math.ceil(remaining / 6);
-  const totalSheets = boxes.length <= labelsOnFirstSheet ? 1 : sheets;
-  document.getElementById("sheetCalc").innerHTML =
-    `Starting at position ${pos + 1} &rarr; ${totalSheets} sheet${totalSheets !== 1 ? "s" : ""}`;
+  updateLabelSheetCalc();
 }
 
 function generateAveryLabels() {
   const boxes = window.__averyBoxes;
   const startPos = window.__averyStart;
+  const copies = Math.max(1, parseInt(document.getElementById("labelCopies").value) || 1);
   document.querySelector(".modal-overlay")?.remove();
 
   const win = window.open("", "_blank");
@@ -915,13 +945,15 @@ function generateAveryLabels() {
   }
   for (const box of boxes) {
     const totalItems = box.items.reduce((sum, i) => sum + (i.quantity || 1), 0);
-    cells.push(`
-      <div class="cell">
-        <div class="lbl-room">${escHtml(box.room_name)}</div>
-        <div class="lbl-box">${escHtml(box.name)} &bull; ${totalItems} item${totalItems !== 1 ? "s" : ""}</div>
-        <img src="/api/boxes/${box.id}/qr" alt="QR">
-      </div>
-    `);
+    for (let c = 0; c < copies; c++) {
+      cells.push(`
+        <div class="cell">
+          <div class="lbl-room">${escHtml(box.room_name)}</div>
+          <div class="lbl-box">${escHtml(box.name)} &bull; ${totalItems} item${totalItems !== 1 ? "s" : ""}</div>
+          <img src="/api/boxes/${box.id}/qr" alt="QR">
+        </div>
+      `);
+    }
   }
   // Pad last page to complete the grid (6 per page)
   while (cells.length % 6 !== 0) {
