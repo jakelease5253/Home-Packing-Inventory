@@ -939,6 +939,7 @@ function generateAveryLabels() {
   const copies = Math.max(1, parseInt(document.getElementById("labelCopies").value) || 1);
   document.querySelector(".modal-overlay")?.remove();
 
+  const baseUrl = window.location.origin;
   const win = window.open("", "_blank");
   if (!win) { toast("Pop-up blocked – please allow pop-ups", "error"); return; }
 
@@ -954,7 +955,7 @@ function generateAveryLabels() {
         <div class="cell">
           <div class="lbl-room">${escHtml(box.room_name)}</div>
           <div class="lbl-box">${escHtml(box.name)} &bull; ${totalItems} item${totalItems !== 1 ? "s" : ""}</div>
-          <img src="/api/boxes/${box.id}/qr" alt="QR">
+          <img src="${baseUrl}/api/boxes/${box.id}/qr" alt="QR">
         </div>
       `);
     }
@@ -971,6 +972,7 @@ function generateAveryLabels() {
   }
 
   win.document.write(`<!DOCTYPE html><html><head><title>Avery 5164 Labels</title>
+<base href="${baseUrl}/">
 <style>
   @page {
     size: letter;
@@ -1019,10 +1021,18 @@ function generateAveryLabels() {
     .cell { border: none; }
   }
 </style></head><body>
-  <div class="no-print">
-    <button onclick="window.print()">Print Labels</button>
-    <span style="margin-left:1rem;font-size:.85rem;color:#666;">Avery 5164 &bull; 6 per sheet &bull; Starting at position ${startPos + 1}</span>
+  <div class="no-print" id="toolbar">
+    <span id="loading" style="font-size:.85rem;color:#666;">Loading QR codes...</span>
+    <button id="printBtn" onclick="window.print()" style="display:none;">Print Labels</button>
+    <span id="info" style="margin-left:1rem;font-size:.85rem;color:#666;display:none;">Avery 5164 &bull; 6 per sheet &bull; Starting at position ${startPos + 1}</span>
   </div>
+  <script>
+    window.onload = function() {
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("printBtn").style.display = "";
+      document.getElementById("info").style.display = "";
+    };
+  </script>
   ${pages}
 </body></html>`);
   win.document.close();
