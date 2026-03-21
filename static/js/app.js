@@ -364,7 +364,7 @@ async function renderBoxDetail(boxId) {
     <div class="card">
       <div class="items-section">
         <div style="padding:0 1rem;">
-          <h3>${box.items.length} Item${box.items.length !== 1 ? "s" : ""}</h3>
+          <h3>${box.items.reduce((s, i) => s + (i.quantity || 1), 0)} Item${box.items.reduce((s, i) => s + (i.quantity || 1), 0) !== 1 ? "s" : ""}</h3>
         </div>
         ${box.items.length === 0 ? `
           <div class="empty-state">

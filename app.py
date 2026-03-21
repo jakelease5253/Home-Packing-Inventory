@@ -52,7 +52,7 @@ class Room(db.Model):
             "name": self.name,
             "is_custom": self.is_custom,
             "box_count": len(self.boxes),
-            "item_count": sum(len(b.items) for b in self.boxes),
+            "item_count": sum(i.quantity for b in self.boxes for i in b.items),
             "sealed_count": sum(1 for b in self.boxes if b.sealed),
             "box_numbers": box_numbers,
             "box_numbers_display": _format_number_ranges(box_numbers),
@@ -100,7 +100,7 @@ class Box(db.Model):
             "notes": self.notes,
             "sealed": self.sealed,
             "created_at": self.created_at.isoformat(),
-            "item_count": len(self.items),
+            "item_count": sum(i.quantity for i in self.items),
             "items": [i.to_dict() for i in self.items],
         }
 
