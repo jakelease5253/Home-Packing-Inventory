@@ -11,9 +11,11 @@ from flask import Flask, render_template, request, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-    "DATABASE_URL", "sqlite:///inventory.db"
-)
+_db_url = os.environ.get("DATABASE_URL", "sqlite:///inventory.db")
+# Railway Postgres uses postgres:// but SQLAlchemy requires postgresql://
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB upload limit
 db = SQLAlchemy(app)
 
@@ -529,7 +531,7 @@ def _migrate_schema():
     box_columns = {col["name"] for col in inspector.get_columns("box")} if inspector.has_table("box") else set()
     if "label_printed" not in box_columns and "box" in {t for t in inspector.get_table_names()}:
         with db.engine.connect() as conn:
-            conn.execute(sqlalchemy.text("ALTER TABLE box ADD COLUMN label_printed BOOLEAN DEFAULT 0"))
+            conn.execute(sqlalchemy.text("ALTER TABLE box ADD COLUMN label_printed BOOLEAN DEFAULT FALSE"))
             conn.commit()
 
 
