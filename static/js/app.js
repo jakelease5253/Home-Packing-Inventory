@@ -351,7 +351,8 @@ async function renderBoxDetail(boxId) {
         ${box.notes ? `<div style="color:var(--text-light);font-size:.85rem;margin-top:.25rem;">${esc(box.notes)}</div>` : ""}
       </div>
       <div class="detail-actions">
-        <button class="btn btn-outline btn-sm" onclick="showQRModal('${box.id}')">QR Label</button>
+        <button class="btn btn-outline btn-sm" onclick="printSingleLabel('${box.id}')">Print Label</button>
+        <button class="btn btn-outline btn-sm" onclick="showQRModal('${box.id}')">QR Code</button>
         ${!box.sealed
           ? `<button class="btn btn-outline btn-sm" onclick="showPhotoModal('${box.id}')">Bulk Photo</button>
              <button class="btn btn-accent btn-sm" onclick="sealBox('${box.id}')">Seal Box</button>`
@@ -699,9 +700,9 @@ async function exportInventory() {
   }
 }
 
-// ── Management: Print All Labels (Avery 5164 – 2×3 grid) ───────────────
+// ── Management: Print Labels (Avery 5164 – 2×3 grid) ───────────────
 
-async function printAllLabels() {
+async function printLabels() {
   let boxes;
   try {
     boxes = await api("/boxes");
@@ -710,13 +711,138 @@ async function printAllLabels() {
     return;
   }
   if (boxes.length === 0) { toast("No boxes to print", "error"); return; }
-  showLabelPositionModal(boxes);
+  showLabelSelectModal(boxes);
+}
+
+// Print a single box label directly (called from box detail view)
+async function printSingleLabel(boxId) {
+  let boxes;
+  try {
+    boxes = await api("/boxes");
+  } catch (err) {
+    toast("Failed to load box: " + err.message, "error");
+    return;
+  }
+  const box = boxes.find(b => b.id === boxId);
+  if (!box) { toast("Box not found", "error"); return; }
+  showLabelPositionModal([box]);
+}
+
+// Step 1: Select which labels to print
+function showLabelSelectModal(boxes) {
+  // Group boxes by room
+  const rooms = {};
+  for (const box of boxes) {
+    const room = box.room_name || "Unknown";
+    if (!rooms[room]) rooms[room] = [];
+    rooms[room].push(box);
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+  const roomsHtml = Object.entries(rooms).map(([roomName, roomBoxes]) => `
+    <div class="label-select-room">
+      <label class="label-select-room-header">
+        <input type="checkbox" checked data-room="${escHtml(roomName)}" onchange="toggleRoom(this)">
+        <span>${escHtml(roomName)}</span>
+        <span class="label-select-count">${roomBoxes.length} box${roomBoxes.length !== 1 ? "es" : ""}</span>
+      </label>
+      <div class="label-select-boxes">
+        ${roomBoxes.map(box => {
+          const itemCount = box.items.reduce((s, i) => s + (i.quantity || 1), 0);
+          return `<label class="label-select-box">
+            <input type="checkbox" checked value="${box.id}" class="label-box-cb">
+            <span>${escHtml(box.name)}</span>
+            <span class="label-select-meta">${itemCount} item${itemCount !== 1 ? "s" : ""}</span>
+          </label>`;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
+
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-header">
+        <h2>Select Labels to Print</h2>
+        <button class="btn btn-icon" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+          <span id="labelSelCount" style="font-size:.85rem;font-weight:600;">${boxes.length} of ${boxes.length} selected</span>
+          <div style="display:flex;gap:.5rem;">
+            <button class="btn btn-outline btn-sm" onclick="toggleAllLabels(true)">Select All</button>
+            <button class="btn btn-outline btn-sm" onclick="toggleAllLabels(false)">Deselect All</button>
+          </div>
+        </div>
+        <div class="label-select-list" id="labelSelectList">
+          ${roomsHtml}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" id="labelNextBtn" onclick="labelSelectNext()">Next</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  window.__allBoxes = boxes;
+
+  // Attach change listeners to update count
+  overlay.querySelectorAll(".label-box-cb").forEach(cb => {
+    cb.addEventListener("change", updateLabelSelCount);
+  });
+}
+
+function toggleAllLabels(checked) {
+  document.querySelectorAll(".label-box-cb").forEach(cb => { cb.checked = checked; });
+  // Also update room checkboxes
+  document.querySelectorAll("[data-room]").forEach(cb => { cb.checked = checked; });
+  updateLabelSelCount();
+}
+
+function toggleRoom(roomCb) {
+  const room = roomCb.closest(".label-select-room");
+  room.querySelectorAll(".label-box-cb").forEach(cb => { cb.checked = roomCb.checked; });
+  updateLabelSelCount();
+}
+
+function updateLabelSelCount() {
+  const total = document.querySelectorAll(".label-box-cb").length;
+  const checked = document.querySelectorAll(".label-box-cb:checked").length;
+  const el = document.getElementById("labelSelCount");
+  if (el) el.textContent = `${checked} of ${total} selected`;
+  const btn = document.getElementById("labelNextBtn");
+  if (btn) btn.disabled = checked === 0;
+
+  // Update room checkbox states
+  document.querySelectorAll(".label-select-room").forEach(room => {
+    const roomCbs = room.querySelectorAll(".label-box-cb");
+    const roomChecked = room.querySelectorAll(".label-box-cb:checked");
+    const roomHeader = room.querySelector("[data-room]");
+    if (roomHeader) {
+      roomHeader.checked = roomChecked.length === roomCbs.length;
+      roomHeader.indeterminate = roomChecked.length > 0 && roomChecked.length < roomCbs.length;
+    }
+  });
+}
+
+function labelSelectNext() {
+  const selectedIds = new Set(
+    Array.from(document.querySelectorAll(".label-box-cb:checked")).map(cb => cb.value)
+  );
+  if (selectedIds.size === 0) { toast("Select at least one label", "error"); return; }
+  const selectedBoxes = window.__allBoxes.filter(b => selectedIds.has(b.id));
+  document.querySelector(".modal-overlay")?.remove();
+  showLabelPositionModal(selectedBoxes);
 }
 
 // Avery 5164: 6 labels/sheet, 2 columns × 3 rows
 // Label: 4" × 3.333", Sheet: 8.5" × 11"
 // Top margin: 0.5", Side margin: 0.15625", No vertical gap, Horizontal gap: 0.1875"
 
+// Step 2: Choose starting position on the Avery sheet
 function showLabelPositionModal(boxes) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -737,8 +863,6 @@ function showLabelPositionModal(boxes) {
         </p>
         <div class="avery-sheet" id="averySheet">
           ${[0,1,2,3,4,5].map(i => {
-            const row = Math.floor(i / 2);
-            const col = i % 2;
             return `<div class="avery-cell${i === 0 ? " selected" : ""}" data-pos="${i}" onclick="selectAveryStart(${i})">
               <div class="avery-pos">${i + 1}</div>
               <div class="avery-hint">${["Top Left","Top Right","Mid Left","Mid Right","Bottom Left","Bottom Right"][i]}</div>
@@ -751,7 +875,7 @@ function showLabelPositionModal(boxes) {
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-        <button class="btn btn-primary" onclick="generateAveryLabels(${boxes.length})">Print Labels</button>
+        <button class="btn btn-primary" onclick="generateAveryLabels()">Print Labels</button>
       </div>
     </div>
   `;
@@ -776,7 +900,7 @@ function selectAveryStart(pos) {
     `Starting at position ${pos + 1} &rarr; ${totalSheets} sheet${totalSheets !== 1 ? "s" : ""}`;
 }
 
-function generateAveryLabels(count) {
+function generateAveryLabels() {
   const boxes = window.__averyBoxes;
   const startPos = window.__averyStart;
   document.querySelector(".modal-overlay")?.remove();

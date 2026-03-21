@@ -359,6 +359,50 @@ body {
 }
 .back-link:hover { color: var(--primary); }
 
+/* ── Label Selector ────────────────────────────────────────────────────── */
+.label-select-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.label-select-room { border-bottom: 1px solid var(--border); }
+.label-select-room:last-child { border-bottom: none; }
+.label-select-room-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .6rem .75rem;
+  background: #f8f9fa;
+  font-weight: 600;
+  font-size: .9rem;
+  cursor: pointer;
+}
+.label-select-room-header input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; }
+.label-select-count {
+  margin-left: auto;
+  font-size: .75rem;
+  font-weight: 400;
+  color: var(--text-light);
+}
+.label-select-boxes { padding: .25rem 0; }
+.label-select-box {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .4rem .75rem .4rem 2rem;
+  cursor: pointer;
+  font-size: .85rem;
+  transition: background .1s;
+}
+.label-select-box:hover { background: #f0f4ff; }
+.label-select-box input[type="checkbox"] { accent-color: var(--primary); width: 14px; height: 14px; }
+.label-select-meta {
+  margin-left: auto;
+  font-size: .75rem;
+  color: var(--text-light);
+}
+
 /* ── Avery 5164 Position Picker ────────────────────────────────────────── */
 .avery-sheet {
   display: grid;
