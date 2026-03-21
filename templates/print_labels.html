@@ -7,32 +7,53 @@
     @page { size: letter; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .no-print { text-align: center; padding: 1rem; background: #f5f5f0; border-bottom: 1px solid #ddd; }
-    .no-print button { padding: .5rem 1.5rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: 1.5px solid #ccc; background: #fff; }
-    .no-print button:hover { border-color: #3478F6; color: #3478F6; }
-    .sheet {
-      width: 8.5in; height: 11in;
-      padding-top: 0.5in; padding-left: 0.15625in;
-      display: grid;
-      grid-template-columns: 4in 4in;
-      grid-template-rows: 3.333in 3.333in 3.333in;
-      column-gap: 0.1875in; row-gap: 0;
-      page-break-after: always;
+
+    .no-print {
+      text-align: center; padding: 1rem;
+      background: #f5f5f0; border-bottom: 1px solid #ddd;
     }
-    .sheet:last-child { page-break-after: avoid; }
-    .cell {
-      width: 4in; height: 3.333in; padding: 0.2in;
-      overflow: hidden; text-align: center;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    .no-print button {
+      padding: .5rem 1.5rem; font-size: 1rem; cursor: pointer;
+      border-radius: 8px; border: 1.5px solid #ccc; background: #fff;
+    }
+    .no-print button:hover { border-color: #3478F6; color: #3478F6; }
+
+    .sheet {
+      width: 8.5in;
+      height: 11in;
+      padding-top: 0.5in;
+      padding-left: 0.15625in;
+      page-break-after: always;
+      break-after: page;
+      overflow: hidden;
+    }
+    .sheet:last-child { page-break-after: avoid; break-after: auto; }
+
+    .sheet table {
+      border-collapse: collapse;
+      table-layout: fixed;
+      width: calc(4in + 0.1875in + 4in);
+    }
+    .sheet td {
+      width: 4in;
+      height: 3.333in;
+      padding: 0.2in;
+      overflow: hidden;
+      text-align: center;
+      vertical-align: middle;
       border: 1px dashed #ccc;
     }
-    .cell.blank { border-color: transparent; }
-    .cell .lbl-room { font-size: 18pt; font-weight: 700; line-height: 1.2; }
-    .cell .lbl-box { font-size: 15pt; font-weight: 600; color: #444; margin-bottom: 8px; }
-    .cell img { width: 1.6in; height: 1.6in; }
+    .sheet td.blank { border-color: transparent; }
+    /* Gap between columns */
+    .sheet td.gap { width: 0.1875in; border: none; padding: 0; }
+
+    .lbl-room { font-size: 18pt; font-weight: 700; line-height: 1.2; }
+    .lbl-box { font-size: 15pt; font-weight: 600; color: #444; margin-bottom: 8px; }
+    .lbl-qr { width: 1.6in; height: 1.6in; }
+
     @media print {
       .no-print { display: none; }
-      .cell { border: none; }
+      .sheet td { border: none; }
     }
   </style>
 </head>
@@ -40,23 +61,42 @@
   <div class="no-print">
     <button onclick="window.print()">Print Labels</button>
     <span style="margin-left:1rem;font-size:.85rem;color:#666;">
-      Avery 5164 &bull; {{ total_labels }} label{{ 's' if total_labels != 1 else '' }} &bull; Starting at position {{ start_pos + 1 }}
+      Avery 5164 &bull; {{ total_labels }} label{{ 's' if total_labels != 1 else '' }}
+      on {{ sheets|length }} sheet{{ 's' if sheets|length != 1 else '' }}
+      &bull; Starting at position {{ start_pos + 1 }}
     </span>
   </div>
 
   {% for sheet in sheets %}
   <div class="sheet">
-    {% for cell in sheet %}
-      {% if cell is none %}
-        <div class="cell blank"></div>
-      {% else %}
-        <div class="cell">
-          <div class="lbl-room">{{ cell.room_name }}</div>
-          <div class="lbl-box">{{ cell.name }} &bull; {{ cell.item_count }} item{{ 's' if cell.item_count != 1 else '' }}</div>
-          <img src="/api/boxes/{{ cell.id }}/qr" alt="QR">
-        </div>
-      {% endif %}
-    {% endfor %}
+    <table>
+      {# Each sheet has 3 rows of 2 labels #}
+      {% for row in range(3) %}
+      <tr>
+        {% set left = sheet[row * 2] %}
+        {% set right = sheet[row * 2 + 1] if (row * 2 + 1) < sheet|length else None %}
+        {% if left %}
+          <td>
+            <div class="lbl-room">{{ left.room_name }}</div>
+            <div class="lbl-box">{{ left.name }} &bull; {{ left.item_count }} item{{ 's' if left.item_count != 1 else '' }}</div>
+            <img class="lbl-qr" src="/api/boxes/{{ left.id }}/qr" alt="QR">
+          </td>
+        {% else %}
+          <td class="blank"></td>
+        {% endif %}
+        <td class="gap"></td>
+        {% if right %}
+          <td>
+            <div class="lbl-room">{{ right.room_name }}</div>
+            <div class="lbl-box">{{ right.name }} &bull; {{ right.item_count }} item{{ 's' if right.item_count != 1 else '' }}</div>
+            <img class="lbl-qr" src="/api/boxes/{{ right.id }}/qr" alt="QR">
+          </td>
+        {% else %}
+          <td class="blank"></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
   </div>
   {% endfor %}
 </body>
