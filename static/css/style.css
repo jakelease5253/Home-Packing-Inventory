@@ -359,6 +359,39 @@ body {
 }
 .back-link:hover { color: var(--primary); }
 
+/* ── Avery 5164 Position Picker ────────────────────────────────────────── */
+.avery-sheet {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  max-width: 300px;
+  margin: 0 auto;
+}
+.avery-cell {
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  padding: .75rem .5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all .15s;
+  background: var(--surface);
+}
+.avery-cell:hover { border-color: var(--primary); background: #f0f4ff; }
+.avery-cell.selected {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.avery-cell.selected .avery-hint { color: rgba(255,255,255,.8); }
+.avery-cell.skipped {
+  background: #f0f0f0;
+  border-color: #ddd;
+  color: #bbb;
+}
+.avery-cell.skipped .avery-hint { color: #ccc; }
+.avery-pos { font-size: 1.1rem; font-weight: 700; }
+.avery-hint { font-size: .65rem; color: var(--text-light); margin-top: 2px; }
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .container { padding: 1rem; }

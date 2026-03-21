@@ -699,45 +699,185 @@ async function exportInventory() {
   }
 }
 
-// ── Management: Print All Labels ────────────────────────────────────────
+// ── Management: Print All Labels (Avery 5164 – 2×3 grid) ───────────────
 
 async function printAllLabels() {
+  let boxes;
   try {
-    const boxes = await api("/boxes");
-    if (boxes.length === 0) { toast("No boxes to print", "error"); return; }
-    const win = window.open("", "_blank");
-    win.document.write(`
-      <!DOCTYPE html><html><head><title>All Labels</title>
-      <style>
-        body { font-family: -apple-system, sans-serif; }
-        .label { border: 2px solid #000; border-radius: 8px; padding: 1rem; max-width: 360px; margin: 1rem auto; text-align: center; page-break-after: always; }
-        .label h2 { margin: 0 0 .25rem; }
-        .label .loc { font-size: .9rem; color: #555; margin-bottom: .75rem; }
-        .label img { width: 150px; height: 150px; }
-        .label ul { text-align: left; font-size: .8rem; margin-top: .5rem; padding-left: 1.2rem; }
-        .label .foot { font-size: .65rem; color: #999; margin-top: .5rem; }
-        @media print { .no-print { display: none; } }
-      </style></head><body>
-      <div class="no-print" style="text-align:center;padding:1rem;">
-        <button onclick="window.print()" style="padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;">Print All</button>
+    boxes = await api("/boxes");
+  } catch (err) {
+    toast("Failed to load boxes: " + err.message, "error");
+    return;
+  }
+  if (boxes.length === 0) { toast("No boxes to print", "error"); return; }
+  showLabelPositionModal(boxes);
+}
+
+// Avery 5164: 6 labels/sheet, 2 columns × 3 rows
+// Label: 4" × 3.333", Sheet: 8.5" × 11"
+// Top margin: 0.5", Side margin: 0.15625", No vertical gap, Horizontal gap: 0.1875"
+
+function showLabelPositionModal(boxes) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <h2>Print Labels – Avery 5164</h2>
+        <button class="btn btn-icon" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:.85rem;color:var(--text-light);margin-bottom:1rem;">
+          Select the starting position on the label sheet. Labels will fill left-to-right, top-to-bottom from your selection. This lets you reuse partially-used sheets.
+        </p>
+        <p style="font-size:.8rem;margin-bottom:.75rem;font-weight:600;">
+          ${boxes.length} label${boxes.length !== 1 ? "s" : ""} to print &bull;
+          ${Math.ceil(boxes.length / 6)} sheet${Math.ceil(boxes.length / 6) !== 1 ? "s" : ""} needed from position 1
+        </p>
+        <div class="avery-sheet" id="averySheet">
+          ${[0,1,2,3,4,5].map(i => {
+            const row = Math.floor(i / 2);
+            const col = i % 2;
+            return `<div class="avery-cell${i === 0 ? " selected" : ""}" data-pos="${i}" onclick="selectAveryStart(${i})">
+              <div class="avery-pos">${i + 1}</div>
+              <div class="avery-hint">${["Top Left","Top Right","Mid Left","Mid Right","Bottom Left","Bottom Right"][i]}</div>
+            </div>`;
+          }).join("")}
+        </div>
+        <p style="font-size:.8rem;color:var(--text-light);margin-top:.75rem;" id="sheetCalc">
+          Starting at position 1 &rarr; ${Math.ceil(boxes.length / 6)} sheet${Math.ceil(boxes.length / 6) !== 1 ? "s" : ""}
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="generateAveryLabels(${boxes.length})">Print Labels</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  window.__averyBoxes = boxes;
+  window.__averyStart = 0;
+}
+
+function selectAveryStart(pos) {
+  window.__averyStart = pos;
+  const cells = document.querySelectorAll(".avery-cell");
+  cells.forEach((c, i) => {
+    c.classList.toggle("selected", i === pos);
+    c.classList.toggle("skipped", i < pos);
+  });
+  const boxes = window.__averyBoxes;
+  const labelsOnFirstSheet = 6 - pos;
+  const remaining = Math.max(0, boxes.length - labelsOnFirstSheet);
+  const sheets = 1 + Math.ceil(remaining / 6);
+  const totalSheets = boxes.length <= labelsOnFirstSheet ? 1 : sheets;
+  document.getElementById("sheetCalc").innerHTML =
+    `Starting at position ${pos + 1} &rarr; ${totalSheets} sheet${totalSheets !== 1 ? "s" : ""}`;
+}
+
+function generateAveryLabels(count) {
+  const boxes = window.__averyBoxes;
+  const startPos = window.__averyStart;
+  document.querySelector(".modal-overlay")?.remove();
+
+  const win = window.open("", "_blank");
+  if (!win) { toast("Pop-up blocked – please allow pop-ups", "error"); return; }
+
+  // Build label cells: blank placeholders for skipped positions, then actual labels
+  const cells = [];
+  for (let i = 0; i < startPos; i++) {
+    cells.push('<div class="cell blank"></div>');
+  }
+  for (const box of boxes) {
+    const items = box.items.slice(0, 12).map(i =>
+      `<li>${escHtml(i.name)}${i.quantity > 1 ? ` (x${i.quantity})` : ""}</li>`
+    ).join("");
+    const moreCount = box.items.length - 12;
+    cells.push(`
+      <div class="cell">
+        <div class="lbl-room">${escHtml(box.room_name)} &ndash; ${escHtml(box.name)}</div>
+        <img src="/api/boxes/${box.id}/qr" alt="QR">
+        ${items ? `<ul>${items}${moreCount > 0 ? `<li class="more">+${moreCount} more</li>` : ""}</ul>` : ""}
+        <div class="lbl-foot">Scan QR to view contents</div>
       </div>
     `);
-    for (const box of boxes) {
-      const items = box.items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` (x${i.quantity})` : ""}</li>`).join("");
-      win.document.write(`
-        <div class="label">
-          <h2>${esc(box.room_name)} &ndash; ${esc(box.name)}</h2>
-          <img src="/api/boxes/${box.id}/qr" alt="QR">
-          ${items ? `<ul>${items}</ul>` : ""}
-          <div class="foot">Scan QR code to view contents</div>
-        </div>
-      `);
-    }
-    win.document.write("</body></html>");
-    win.document.close();
-  } catch (err) {
-    toast("Failed to generate labels: " + err.message, "error");
   }
+  // Pad last page to complete the grid (6 per page)
+  while (cells.length % 6 !== 0) {
+    cells.push('<div class="cell blank"></div>');
+  }
+
+  // Build pages
+  let pages = "";
+  for (let i = 0; i < cells.length; i += 6) {
+    pages += `<div class="sheet">${cells.slice(i, i + 6).join("")}</div>`;
+  }
+
+  win.document.write(`<!DOCTYPE html><html><head><title>Avery 5164 Labels</title>
+<style>
+  @page {
+    size: letter;
+    margin: 0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .no-print { text-align: center; padding: 1rem; background: #f5f5f0; border-bottom: 1px solid #ddd; }
+  .no-print button { padding: .5rem 1.5rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: 1.5px solid #ccc; background: #fff; }
+  .no-print button:hover { border-color: #3478F6; color: #3478F6; }
+
+  .sheet {
+    width: 8.5in;
+    height: 11in;
+    padding-top: 0.5in;
+    padding-left: 0.15625in;
+    display: grid;
+    grid-template-columns: 4in 4in;
+    grid-template-rows: 3.333in 3.333in 3.333in;
+    column-gap: 0.1875in;
+    row-gap: 0;
+    page-break-after: always;
+  }
+  .sheet:last-child { page-break-after: avoid; }
+
+  .cell {
+    width: 4in;
+    height: 3.333in;
+    padding: 0.2in;
+    overflow: hidden;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed #ccc;
+  }
+  .cell.blank { border-color: transparent; }
+
+  .cell .lbl-room { font-size: 11pt; font-weight: 700; margin-bottom: 4px; line-height: 1.2; }
+  .cell img { width: 1.3in; height: 1.3in; }
+  .cell ul { text-align: left; font-size: 7pt; margin-top: 4px; padding-left: 14px; line-height: 1.3; list-style: disc; columns: 2; column-gap: 8px; }
+  .cell ul li { break-inside: avoid; }
+  .cell ul li.more { font-style: italic; color: #888; }
+  .cell .lbl-foot { font-size: 6pt; color: #999; margin-top: 4px; }
+
+  @media print {
+    .no-print { display: none; }
+    .cell { border: none; }
+  }
+</style></head><body>
+  <div class="no-print">
+    <button onclick="window.print()">Print Labels</button>
+    <span style="margin-left:1rem;font-size:.85rem;color:#666;">Avery 5164 &bull; 6 per sheet &bull; Starting at position ${startPos + 1}</span>
+  </div>
+  ${pages}
+</body></html>`);
+  win.document.close();
+}
+
+// HTML escaper for print window (no DOM access to main page's esc())
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────
