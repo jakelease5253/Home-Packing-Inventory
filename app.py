@@ -522,8 +522,20 @@ def _migrate_existing_boxes():
     db.session.commit()
 
 
+def _migrate_schema():
+    """Add any missing columns to existing tables."""
+    import sqlalchemy
+    inspector = sqlalchemy.inspect(db.engine)
+    box_columns = {col["name"] for col in inspector.get_columns("box")} if inspector.has_table("box") else set()
+    if "label_printed" not in box_columns and "box" in {t for t in inspector.get_table_names()}:
+        with db.engine.connect() as conn:
+            conn.execute(sqlalchemy.text("ALTER TABLE box ADD COLUMN label_printed BOOLEAN DEFAULT 0"))
+            conn.commit()
+
+
 with app.app_context():
     db.create_all()
+    _migrate_schema()
     _seed_rooms()
     _migrate_existing_boxes()
 
