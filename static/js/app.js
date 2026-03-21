@@ -939,103 +939,10 @@ function generateAveryLabels() {
   const copies = Math.max(1, parseInt(document.getElementById("labelCopies").value) || 1);
   document.querySelector(".modal-overlay")?.remove();
 
-  const baseUrl = window.location.origin;
-  const win = window.open("", "_blank");
-  if (!win) { toast("Pop-up blocked – please allow pop-ups", "error"); return; }
-
-  // Build label cells: blank placeholders for skipped positions, then actual labels
-  const cells = [];
-  for (let i = 0; i < startPos; i++) {
-    cells.push('<div class="cell blank"></div>');
-  }
-  for (const box of boxes) {
-    const totalItems = box.items.reduce((sum, i) => sum + (i.quantity || 1), 0);
-    for (let c = 0; c < copies; c++) {
-      cells.push(`
-        <div class="cell">
-          <div class="lbl-room">${escHtml(box.room_name)}</div>
-          <div class="lbl-box">${escHtml(box.name)} &bull; ${totalItems} item${totalItems !== 1 ? "s" : ""}</div>
-          <img src="${baseUrl}/api/boxes/${box.id}/qr" alt="QR">
-        </div>
-      `);
-    }
-  }
-  // Pad last page to complete the grid (6 per page)
-  while (cells.length % 6 !== 0) {
-    cells.push('<div class="cell blank"></div>');
-  }
-
-  // Build pages
-  let pages = "";
-  for (let i = 0; i < cells.length; i += 6) {
-    pages += `<div class="sheet">${cells.slice(i, i + 6).join("")}</div>`;
-  }
-
-  win.document.write(`<!DOCTYPE html><html><head><title>Avery 5164 Labels</title>
-<base href="${baseUrl}/">
-<style>
-  @page {
-    size: letter;
-    margin: 0;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  .no-print { text-align: center; padding: 1rem; background: #f5f5f0; border-bottom: 1px solid #ddd; }
-  .no-print button { padding: .5rem 1.5rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: 1.5px solid #ccc; background: #fff; }
-  .no-print button:hover { border-color: #3478F6; color: #3478F6; }
-
-  .sheet {
-    width: 8.5in;
-    height: 11in;
-    padding-top: 0.5in;
-    padding-left: 0.15625in;
-    display: grid;
-    grid-template-columns: 4in 4in;
-    grid-template-rows: 3.333in 3.333in 3.333in;
-    column-gap: 0.1875in;
-    row-gap: 0;
-    page-break-after: always;
-  }
-  .sheet:last-child { page-break-after: avoid; }
-
-  .cell {
-    width: 4in;
-    height: 3.333in;
-    padding: 0.2in;
-    overflow: hidden;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    border: 1px dashed #ccc;
-  }
-  .cell.blank { border-color: transparent; }
-
-  .cell .lbl-room { font-size: 18pt; font-weight: 700; line-height: 1.2; }
-  .cell .lbl-box { font-size: 15pt; font-weight: 600; color: #444; margin-bottom: 8px; }
-  .cell img { width: 1.6in; height: 1.6in; }
-
-  @media print {
-    .no-print { display: none; }
-    .cell { border: none; }
-  }
-</style></head><body>
-  <div class="no-print" id="toolbar">
-    <span id="loading" style="font-size:.85rem;color:#666;">Loading QR codes...</span>
-    <button id="printBtn" onclick="window.print()" style="display:none;">Print Labels</button>
-    <span id="info" style="margin-left:1rem;font-size:.85rem;color:#666;display:none;">Avery 5164 &bull; 6 per sheet &bull; Starting at position ${startPos + 1}</span>
-  </div>
-  <script>
-    window.onload = function() {
-      document.getElementById("loading").style.display = "none";
-      document.getElementById("printBtn").style.display = "";
-      document.getElementById("info").style.display = "";
-    };
-  </script>
-  ${pages}
-</body></html>`);
-  win.document.close();
+  // Open the server-rendered print page
+  const ids = boxes.map(b => b.id).join(",");
+  const url = `/print-labels?ids=${encodeURIComponent(ids)}&copies=${copies}&start=${startPos}`;
+  window.open(url, "_blank");
 
   // Mark these boxes as label_printed
   api("/boxes/mark-printed", {

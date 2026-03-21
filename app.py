@@ -408,6 +408,39 @@ def box_qr_label(box_id):
     return render_template("label.html", box=box, base_url=request.host_url.rstrip("/"))
 
 
+@app.route("/print-labels")
+def print_labels_page():
+    ids = request.args.get("ids", "")
+    copies = int(request.args.get("copies", 2))
+    start = int(request.args.get("start", 0))
+    box_ids = [bid.strip() for bid in ids.split(",") if bid.strip()]
+    boxes = Box.query.filter(Box.id.in_(box_ids)).order_by(Box.room_id, Box.number).all()
+
+    # Build flat list of cells: None = blank, otherwise box dict
+    cells = [None] * start
+    for box in boxes:
+        cell = {
+            "id": box.id,
+            "room_name": box.room.name if box.room else "",
+            "name": box.name,
+            "item_count": sum(i.quantity for i in box.items),
+        }
+        for _ in range(copies):
+            cells.append(cell)
+    # Pad to fill last sheet
+    while len(cells) % 6 != 0:
+        cells.append(None)
+    # Group into sheets of 6
+    sheets = [cells[i:i+6] for i in range(0, len(cells), 6)]
+
+    return render_template(
+        "print_labels.html",
+        sheets=sheets,
+        total_labels=len(boxes) * copies,
+        start_pos=start,
+    )
+
+
 # ── Photo analysis via Claude Vision ────────────────────────────────────────
 
 def _analyze_image_with_claude(image_b64: str, media_type: str) -> list[dict]:
