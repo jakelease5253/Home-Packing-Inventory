@@ -790,16 +790,11 @@ function generateAveryLabels(count) {
     cells.push('<div class="cell blank"></div>');
   }
   for (const box of boxes) {
-    const items = box.items.slice(0, 12).map(i =>
-      `<li>${escHtml(i.name)}${i.quantity > 1 ? ` (x${i.quantity})` : ""}</li>`
-    ).join("");
-    const moreCount = box.items.length - 12;
     cells.push(`
       <div class="cell">
-        <div class="lbl-room">${escHtml(box.room_name)} &ndash; ${escHtml(box.name)}</div>
+        <div class="lbl-room">${escHtml(box.room_name)}</div>
+        <div class="lbl-box">${escHtml(box.name)}</div>
         <img src="/api/boxes/${box.id}/qr" alt="QR">
-        ${items ? `<ul>${items}${moreCount > 0 ? `<li class="more">+${moreCount} more</li>` : ""}</ul>` : ""}
-        <div class="lbl-foot">Scan QR to view contents</div>
       </div>
     `);
   }
@@ -854,12 +849,9 @@ function generateAveryLabels(count) {
   }
   .cell.blank { border-color: transparent; }
 
-  .cell .lbl-room { font-size: 11pt; font-weight: 700; margin-bottom: 4px; line-height: 1.2; }
-  .cell img { width: 1.3in; height: 1.3in; }
-  .cell ul { text-align: left; font-size: 7pt; margin-top: 4px; padding-left: 14px; line-height: 1.3; list-style: disc; columns: 2; column-gap: 8px; }
-  .cell ul li { break-inside: avoid; }
-  .cell ul li.more { font-style: italic; color: #888; }
-  .cell .lbl-foot { font-size: 6pt; color: #999; margin-top: 4px; }
+  .cell .lbl-room { font-size: 18pt; font-weight: 700; line-height: 1.2; }
+  .cell .lbl-box { font-size: 15pt; font-weight: 600; color: #444; margin-bottom: 8px; }
+  .cell img { width: 1.6in; height: 1.6in; }
 
   @media print {
     .no-print { display: none; }
