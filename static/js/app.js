@@ -790,10 +790,11 @@ function generateAveryLabels(count) {
     cells.push('<div class="cell blank"></div>');
   }
   for (const box of boxes) {
+    const totalItems = box.items.reduce((sum, i) => sum + (i.quantity || 1), 0);
     cells.push(`
       <div class="cell">
         <div class="lbl-room">${escHtml(box.room_name)}</div>
-        <div class="lbl-box">${escHtml(box.name)}</div>
+        <div class="lbl-box">${escHtml(box.name)} &bull; ${totalItems} item${totalItems !== 1 ? "s" : ""}</div>
         <img src="/api/boxes/${box.id}/qr" alt="QR">
       </div>
     `);
