@@ -408,6 +408,21 @@ def box_qr_label(box_id):
     return render_template("label.html", box=box, base_url=request.host_url.rstrip("/"))
 
 
+def _generate_qr_data_uri(box_id):
+    """Generate a QR code as a base64 data URI."""
+    base_url = request.host_url.rstrip("/")
+    qr_data = f"{base_url}/?box={box_id}"
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(qr_data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
 @app.route("/print-labels")
 def print_labels_page():
     ids = request.args.get("ids", "")
@@ -416,14 +431,16 @@ def print_labels_page():
     box_ids = [bid.strip() for bid in ids.split(",") if bid.strip()]
     boxes = Box.query.filter(Box.id.in_(box_ids)).order_by(Box.room_id, Box.number).all()
 
-    # Build flat list of cells: None = blank, otherwise box dict
+    # Build flat list of cells: None = blank, otherwise box dict with embedded QR
     cells = [None] * start
     for box in boxes:
+        qr_uri = _generate_qr_data_uri(box.id)
         cell = {
             "id": box.id,
             "room_name": box.room.name if box.room else "",
             "name": box.name,
             "item_count": sum(i.quantity for i in box.items),
+            "qr": qr_uri,
         }
         for _ in range(copies):
             cells.append(cell)

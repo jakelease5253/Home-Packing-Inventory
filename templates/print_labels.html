@@ -79,7 +79,7 @@
           <td>
             <div class="lbl-room">{{ left.room_name }}</div>
             <div class="lbl-box">{{ left.name }} &bull; {{ left.item_count }} item{{ 's' if left.item_count != 1 else '' }}</div>
-            <img class="lbl-qr" src="/api/boxes/{{ left.id }}/qr" alt="QR">
+            <img class="lbl-qr" src="{{ left.qr }}" alt="QR">
           </td>
         {% else %}
           <td class="blank"></td>
@@ -89,7 +89,7 @@
           <td>
             <div class="lbl-room">{{ right.room_name }}</div>
             <div class="lbl-box">{{ right.name }} &bull; {{ right.item_count }} item{{ 's' if right.item_count != 1 else '' }}</div>
-            <img class="lbl-qr" src="/api/boxes/{{ right.id }}/qr" alt="QR">
+            <img class="lbl-qr" src="{{ right.qr }}" alt="QR">
           </td>
         {% else %}
           <td class="blank"></td>
