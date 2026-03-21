@@ -84,6 +84,7 @@ class Box(db.Model):
     location = db.Column(db.String(120), default="")
     notes = db.Column(db.Text, default="")
     sealed = db.Column(db.Boolean, default=False)
+    label_printed = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     items = db.relationship("Item", backref="box", cascade="all, delete-orphan", lazy=True)
 
@@ -99,6 +100,7 @@ class Box(db.Model):
             "location": self.room.name if self.room else self.location,
             "notes": self.notes,
             "sealed": self.sealed,
+            "label_printed": self.label_printed,
             "created_at": self.created_at.isoformat(),
             "item_count": sum(i.quantity for i in self.items),
             "items": [i.to_dict() for i in self.items],
@@ -242,6 +244,15 @@ def update_box(box_id):
         box.sealed = data["sealed"]
     db.session.commit()
     return jsonify(box.to_dict())
+
+
+@app.route("/api/boxes/mark-printed", methods=["POST"])
+def mark_boxes_printed():
+    data = request.json
+    box_ids = data.get("box_ids", [])
+    Box.query.filter(Box.id.in_(box_ids)).update({"label_printed": True}, synchronize_session="fetch")
+    db.session.commit()
+    return jsonify({"updated": len(box_ids)})
 
 
 @app.route("/api/boxes/<box_id>", methods=["DELETE"])

@@ -214,7 +214,10 @@ function boxCard(box) {
             <div class="box-name">${esc(box.name)}</div>
             ${box.notes ? `<div class="box-location">${esc(box.notes)}</div>` : ""}
           </div>
-          <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span>
+          <div style="display:flex;gap:.35rem;align-items:center;">
+            <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span>
+            ${box.label_printed ? '<span class="badge badge-labeled">Labeled</span>' : ""}
+          </div>
         </div>
         ${itemPreview ? `<div style="font-size:.85rem;color:var(--text-light);margin-top:.5rem;">${esc(itemPreview)}${moreCount}</div>` : ""}
         <div class="box-meta">
@@ -347,7 +350,7 @@ async function renderBoxDetail(boxId) {
 
     <div class="detail-header">
       <div>
-        <div class="detail-title">${esc(box.room_name)} &ndash; ${esc(box.name)} <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span></div>
+        <div class="detail-title">${esc(box.room_name)} &ndash; ${esc(box.name)} <span class="badge ${box.sealed ? "badge-sealed" : "badge-open"}">${box.sealed ? "Sealed" : "Open"}</span>${box.label_printed ? ' <span class="badge badge-labeled">Labeled</span>' : ""}</div>
         ${box.notes ? `<div style="color:var(--text-light);font-size:.85rem;margin-top:.25rem;">${esc(box.notes)}</div>` : ""}
       </div>
       <div class="detail-actions">
@@ -769,6 +772,7 @@ function showLabelSelectModal(boxes) {
           return `<label class="label-select-box">
             <input type="checkbox" checked value="${box.id}" class="label-box-cb">
             <span>${escHtml(box.name)}</span>
+            ${box.label_printed ? '<span class="badge badge-labeled" style="font-size:.6rem;padding:.1rem .35rem;">Labeled</span>' : ""}
             <span class="label-select-meta">${itemCount} item${itemCount !== 1 ? "s" : ""}</span>
           </label>`;
         }).join("")}
@@ -1022,6 +1026,12 @@ function generateAveryLabels() {
   ${pages}
 </body></html>`);
   win.document.close();
+
+  // Mark these boxes as label_printed
+  api("/boxes/mark-printed", {
+    method: "POST",
+    body: { box_ids: boxes.map(b => b.id) },
+  }).catch(() => {});
 }
 
 // HTML escaper for print window (no DOM access to main page's esc())

@@ -173,6 +173,7 @@ body {
 }
 .badge-sealed { background: var(--sealed); color: var(--primary-dark); }
 .badge-open { background: #fff3cd; color: #856404; }
+.badge-labeled { background: #e0e7ff; color: #3b5998; }
 
 /* ── Box Detail ────────────────────────────────────────────────────────── */
 .detail-header {
