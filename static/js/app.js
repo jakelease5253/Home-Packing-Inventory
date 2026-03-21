@@ -933,28 +933,17 @@ function selectAveryStart(pos) {
   updateLabelSheetCalc();
 }
 
-async function generateAveryLabels() {
+function generateAveryLabels() {
   const boxes = window.__averyBoxes;
   const startPos = window.__averyStart;
   const copies = Math.max(1, parseInt(document.getElementById("labelCopies").value) || 1);
   document.querySelector(".modal-overlay")?.remove();
 
-  // Fetch the fully rendered print page from the server, then open it
-  // as an in-memory blob URL so the browser never re-fetches during print
+  // Open server-generated PDF directly
   const ids = boxes.map(b => b.id).join(",");
   const url = `/print-labels?ids=${encodeURIComponent(ids)}&copies=${copies}&start=${startPos}`;
-  try {
-    toast("Generating labels...", "success");
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error("Failed to generate labels");
-    const html = await resp.text();
-    const blob = new Blob([html], { type: "text/html" });
-    const blobUrl = URL.createObjectURL(blob);
-    window.open(blobUrl, "_blank");
-  } catch (err) {
-    toast("Failed to generate labels: " + err.message, "error");
-    return;
-  }
+  toast("Generating PDF...", "success");
+  window.open(url, "_blank");
 
   // Mark these boxes as label_printed
   api("/boxes/mark-printed", {

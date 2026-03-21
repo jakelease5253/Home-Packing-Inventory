@@ -408,54 +408,89 @@ def box_qr_label(box_id):
     return render_template("label.html", box=box, base_url=request.host_url.rstrip("/"))
 
 
-def _generate_qr_data_uri(box_id):
-    """Generate a QR code as a base64 data URI."""
+def _generate_qr_image(box_id):
+    """Generate a QR code as a PIL Image."""
     base_url = request.host_url.rstrip("/")
     qr_data = f"{base_url}/?box={box_id}"
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(qr_data)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{b64}"
+    return qr.make_image(fill_color="black", back_color="white")
 
 
 @app.route("/print-labels")
 def print_labels_page():
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import inch
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
+
     ids = request.args.get("ids", "")
     copies = int(request.args.get("copies", 2))
     start = int(request.args.get("start", 0))
     box_ids = [bid.strip() for bid in ids.split(",") if bid.strip()]
     boxes = Box.query.filter(Box.id.in_(box_ids)).order_by(Box.room_id, Box.number).all()
 
-    # Build flat list of cells: None = blank, otherwise box dict with embedded QR
+    # Avery 5164: 2 columns × 3 rows, label 4" × 3.333"
+    # Sheet: 8.5" × 11", top margin 0.5", side margin 0.15625", col gap 0.1875"
+    page_w, page_h = letter  # 612 × 792 points
+    label_w = 4 * inch
+    label_h = 3.333 * inch
+    margin_top = 0.5 * inch
+    margin_left = 0.15625 * inch
+    col_gap = 0.1875 * inch
+
+    # Build flat cell list: None = blank, otherwise box object
     cells = [None] * start
     for box in boxes:
-        qr_uri = _generate_qr_data_uri(box.id)
-        cell = {
-            "id": box.id,
-            "room_name": box.room.name if box.room else "",
-            "name": box.name,
-            "item_count": sum(i.quantity for i in box.items),
-            "qr": qr_uri,
-        }
         for _ in range(copies):
-            cells.append(cell)
+            cells.append(box)
     # Pad to fill last sheet
     while len(cells) % 6 != 0:
         cells.append(None)
-    # Group into sheets of 6
-    sheets = [cells[i:i+6] for i in range(0, len(cells), 6)]
 
-    return render_template(
-        "print_labels.html",
-        sheets=sheets,
-        total_labels=len(boxes) * copies,
-        start_pos=start,
-    )
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+
+    for idx, box in enumerate(cells):
+        pos_on_sheet = idx % 6
+        col = pos_on_sheet % 2
+        row = pos_on_sheet // 2
+
+        if idx > 0 and pos_on_sheet == 0:
+            c.showPage()
+
+        if box is None:
+            continue
+
+        # Calculate position (PDF origin is bottom-left)
+        x = margin_left + col * (label_w + col_gap)
+        y = page_h - margin_top - (row + 1) * label_h
+
+        # Room name
+        room_name = box.room.name if box.room else ""
+        c.setFont("Helvetica-Bold", 16)
+        c.drawCentredString(x + label_w / 2, y + label_h - 0.4 * inch, room_name)
+
+        # Box name + item count
+        item_count = sum(i.quantity for i in box.items)
+        box_line = f"{box.name}  •  {item_count} item{'s' if item_count != 1 else ''}"
+        c.setFont("Helvetica", 13)
+        c.drawCentredString(x + label_w / 2, y + label_h - 0.75 * inch, box_line)
+
+        # QR code
+        qr_img = _generate_qr_image(box.id)
+        qr_buf = io.BytesIO()
+        qr_img.save(qr_buf, format="PNG")
+        qr_buf.seek(0)
+        qr_size = 1.6 * inch
+        qr_x = x + (label_w - qr_size) / 2
+        qr_y = y + 0.25 * inch
+        c.drawImage(ImageReader(qr_buf), qr_x, qr_y, qr_size, qr_size)
+
+    c.save()
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", download_name="labels.pdf")
 
 
 # ── Photo analysis via Claude Vision ────────────────────────────────────────
