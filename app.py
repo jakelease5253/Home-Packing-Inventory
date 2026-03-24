@@ -493,6 +493,75 @@ def print_labels_page():
     return send_file(buf, mimetype="application/pdf", download_name="labels.pdf")
 
 
+# ── Packing Sticker Sheets (Avery 5164) ────────────────────────────────────
+
+STICKER_TYPES = {
+    "fragile": {
+        "line1": "FRAGILE",
+        "line2": "Handle with Care",
+        "color": (0.85, 0.05, 0.05),  # Red
+        "filename": "fragile-stickers.pdf",
+    },
+    "no-stack": {
+        "line1": "DO NOT",
+        "line2": "STACK",
+        "color": (0.05, 0.15, 0.85),  # Blue
+        "filename": "do-not-stack-stickers.pdf",
+    },
+}
+
+
+@app.route("/print-stickers")
+def print_stickers_page():
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import inch
+    from reportlab.pdfgen import canvas
+
+    sticker = request.args.get("type", "fragile")
+    sheets = max(1, min(20, int(request.args.get("sheets", 1))))
+    cfg = STICKER_TYPES.get(sticker, STICKER_TYPES["fragile"])
+
+    page_w, page_h = letter
+    label_w = 4 * inch
+    label_h = 3.333 * inch
+    margin_top = 0.5 * inch
+    margin_left = 0.15625 * inch
+    col_gap = 0.1875 * inch
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+
+    r, g, b = cfg["color"]
+
+    for sheet_num in range(sheets):
+        if sheet_num > 0:
+            c.showPage()
+
+        for pos in range(6):
+            col = pos % 2
+            row = pos // 2
+            x = margin_left + col * (label_w + col_gap)
+            y = page_h - margin_top - (row + 1) * label_h
+
+            # Draw a rounded border for the sticker
+            c.setStrokeColorRGB(r, g, b)
+            c.setLineWidth(3)
+            c.roundRect(x + 8, y + 8, label_w - 16, label_h - 16, 10)
+
+            # Line 1 - large bold text
+            c.setFillColorRGB(r, g, b)
+            c.setFont("Helvetica-Bold", 42)
+            c.drawCentredString(x + label_w / 2, y + label_h / 2 + 10, cfg["line1"])
+
+            # Line 2 - slightly smaller
+            c.setFont("Helvetica-Bold", 28)
+            c.drawCentredString(x + label_w / 2, y + label_h / 2 - 30, cfg["line2"])
+
+    c.save()
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", download_name=cfg["filename"])
+
+
 # ── Photo analysis via Claude Vision ────────────────────────────────────────
 
 def _analyze_image_with_claude(image_b64: str, media_type: str) -> list[dict]:

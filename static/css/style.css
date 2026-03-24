@@ -437,6 +437,18 @@ body {
 .avery-pos { font-size: 1.1rem; font-weight: 700; }
 .avery-hint { font-size: .65rem; color: var(--text-light); margin-top: 2px; }
 
+/* ── Sticker Options ──────────────────────────────────────────────────── */
+.sticker-option {
+  display: block;
+  padding: .75rem 1rem;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.sticker-option:hover { border-color: var(--primary); background: #f0f6ff; }
+.sticker-option.selected { border-color: var(--primary); background: #e8f0fe; }
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .container { padding: 1rem; }

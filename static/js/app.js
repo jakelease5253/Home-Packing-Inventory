@@ -952,6 +952,64 @@ function generateAveryLabels() {
   }).catch(() => {});
 }
 
+// ── Packing Sticker Sheets (Avery 5164) ──────────────────────────────
+
+function printStickers() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <h2>Print Packing Stickers</h2>
+        <button class="btn btn-icon" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:.85rem;color:var(--text-light);margin-bottom:1rem;">
+          Print full sheets of packing stickers on Avery 5164 label sheets (6 per sheet).
+        </p>
+        <div style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1rem;">
+          <label class="sticker-option selected" data-type="fragile" onclick="selectStickerType(this)">
+            <div style="display:flex;align-items:center;gap:.75rem;">
+              <span style="font-size:1.5rem;font-weight:800;color:#d90c0c;line-height:1;">FRAGILE</span>
+              <span style="font-size:.85rem;color:var(--text-light);">Handle with Care</span>
+            </div>
+          </label>
+          <label class="sticker-option" data-type="no-stack" onclick="selectStickerType(this)">
+            <div style="display:flex;align-items:center;gap:.75rem;">
+              <span style="font-size:1.5rem;font-weight:800;color:#0c27d9;line-height:1;">DO NOT STACK</span>
+            </div>
+          </label>
+        </div>
+        <div style="display:flex;align-items:center;gap:.75rem;">
+          <label style="font-size:.8rem;font-weight:600;white-space:nowrap;">Number of sheets:</label>
+          <input type="number" id="stickerSheets" class="form-control" min="1" max="20" value="1" style="max-width:70px;">
+        </div>
+        <p style="font-size:.8rem;color:var(--text-light);margin-top:.5rem;">Each sheet prints 6 stickers.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="generateStickers()">Print Stickers</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function selectStickerType(el) {
+  el.closest(".modal-body").querySelectorAll(".sticker-option").forEach(o => o.classList.remove("selected"));
+  el.classList.add("selected");
+}
+
+function generateStickers() {
+  const selected = document.querySelector(".sticker-option.selected");
+  const type = selected ? selected.dataset.type : "fragile";
+  const sheets = Math.max(1, parseInt(document.getElementById("stickerSheets").value) || 1);
+  document.querySelector(".modal-overlay")?.remove();
+  toast("Generating sticker PDF...", "success");
+  window.open(`/print-stickers?type=${type}&sheets=${sheets}`, "_blank");
+}
+
 // HTML escaper for print window (no DOM access to main page's esc())
 function escHtml(s) {
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
