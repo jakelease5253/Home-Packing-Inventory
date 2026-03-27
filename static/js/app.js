@@ -41,6 +41,7 @@ function navigate(view, params = {}) {
   if (view === "dashboard") renderDashboard();
   else if (view === "room") renderRoomDetail(params.id);
   else if (view === "box") renderBoxDetail(params.id);
+  else if (view === "stats") renderStatsPage();
 }
 
 // Check URL for ?box=<id> (from QR code scan)
@@ -57,7 +58,7 @@ function checkDeepLink() {
 // ── Dashboard ────────────────────────────────────────────────────────────
 
 async function renderDashboard() {
-  const rooms = await api("/rooms");
+  const [rooms, stats] = await Promise.all([api("/rooms"), api("/stats")]);
   const totalBoxes = rooms.reduce((s, r) => s + r.box_count, 0);
   const totalItems = rooms.reduce((s, r) => s + r.item_count, 0);
   const totalSealed = rooms.reduce((s, r) => s + r.sealed_count, 0);
@@ -80,6 +81,14 @@ async function renderDashboard() {
       <div class="stat-card">
         <div class="number">${totalSealed}</div>
         <div class="label">Sealed</div>
+      </div>
+      <div class="stat-card stat-card-highlight" onclick="navigate('stats')" style="cursor:pointer;" title="View detailed stats">
+        <div class="number">${stats.today.boxes}</div>
+        <div class="label">Today's Boxes</div>
+      </div>
+      <div class="stat-card stat-card-highlight" onclick="navigate('stats')" style="cursor:pointer;" title="View detailed stats">
+        <div class="number">${stats.this_week.boxes}</div>
+        <div class="label">This Week</div>
       </div>
     </div>
 
@@ -680,6 +689,116 @@ function addBulkItemRow(value = "") {
   const input = row.querySelector("input");
   if (!value) input.focus();
 }
+
+// ── Stats Page ──────────────────────────────────────────────────────────
+
+async function renderStatsPage() {
+  const stats = await api("/stats");
+  const daily = stats.daily;
+  const maxBoxes = Math.max(1, ...daily.map(d => d.boxes));
+
+  // Format date for display
+  function fmtDate(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  function fmtDateFull(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  }
+
+  // Show last 30 days max for the chart
+  const chartData = daily.slice(-30);
+  const maxChartVal = Math.max(1, ...chartData.map(d => d.boxes));
+
+  app.innerHTML = `
+    <a class="back-link" onclick="navigate('dashboard')">&#8592; Dashboard</a>
+
+    <h2 style="margin:.5rem 0 1rem;">Packing Stats</h2>
+
+    <div class="stats">
+      <div class="stat-card stat-card-highlight">
+        <div class="number">${stats.today.boxes}</div>
+        <div class="label">Today's Boxes</div>
+      </div>
+      <div class="stat-card stat-card-highlight">
+        <div class="number">${stats.today.items}</div>
+        <div class="label">Today's Items</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${stats.this_week.boxes}</div>
+        <div class="label">This Week</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${stats.total_boxes}</div>
+        <div class="label">All Time Boxes</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">${stats.total_items}</div>
+        <div class="label">All Time Items</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1.5rem;">
+      <div class="card-body">
+        <h3 style="font-size:1rem;margin-bottom:1rem;color:var(--text-light);text-transform:uppercase;letter-spacing:.05em;">Boxes Created Per Day</h3>
+        ${chartData.length === 0 ? `
+          <div class="empty-state">
+            <p>No boxes created yet. Start packing to see your stats!</p>
+          </div>
+        ` : `
+          <div class="chart-container">
+            ${chartData.map(d => {
+              const pct = (d.boxes / maxChartVal) * 100;
+              const isToday = d.date === new Date().toISOString().slice(0, 10);
+              return `
+                <div class="chart-row${isToday ? " chart-row-today" : ""}" title="${fmtDateFull(d.date)}: ${d.boxes} box${d.boxes !== 1 ? "es" : ""}, ${d.items} item${d.items !== 1 ? "s" : ""}">
+                  <div class="chart-label">${fmtDate(d.date)}</div>
+                  <div class="chart-bar-track">
+                    <div class="chart-bar" style="width:${pct}%"></div>
+                  </div>
+                  <div class="chart-value">${d.boxes}</div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `}
+      </div>
+    </div>
+
+    ${daily.length > 0 ? `
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-body">
+          <h3 style="font-size:1rem;margin-bottom:1rem;color:var(--text-light);text-transform:uppercase;letter-spacing:.05em;">Daily Breakdown</h3>
+          <div class="stats-table-wrap">
+            <table class="stats-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Boxes</th>
+                  <th>Items</th>
+                  <th>Sealed</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${[...daily].reverse().map(d => `
+                  <tr${d.date === new Date().toISOString().slice(0, 10) ? ' class="stats-row-today"' : ""}>
+                    <td>${fmtDateFull(d.date)}</td>
+                    <td>${d.boxes}</td>
+                    <td>${d.items}</td>
+                    <td>${d.sealed}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    ` : ""}
+  `;
+}
+
 
 // ── Utility ──────────────────────────────────────────────────────────────
 

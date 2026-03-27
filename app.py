@@ -2,7 +2,8 @@ import io
 import os
 import base64
 import uuid
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 import qrcode
@@ -358,6 +359,63 @@ def delete_item(item_id):
     db.session.delete(item)
     db.session.commit()
     return jsonify({"ok": True})
+
+
+# ── Stats API ────────────────────────────────────────────────────────────
+
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    boxes = Box.query.order_by(Box.created_at).all()
+    items = Item.query.all()
+
+    # Boxes per day
+    boxes_by_day = defaultdict(lambda: {"boxes": 0, "items": 0, "sealed": 0})
+    for box in boxes:
+        day = box.created_at.strftime("%Y-%m-%d") if box.created_at else "Unknown"
+        boxes_by_day[day]["boxes"] += 1
+        boxes_by_day[day]["items"] += sum(i.quantity for i in box.items)
+        if box.sealed:
+            boxes_by_day[day]["sealed"] += 1
+
+    # Items per day (by when the item's box was created)
+    items_by_day = defaultdict(int)
+    for item in items:
+        if item.box and item.box.created_at:
+            day = item.created_at.strftime("%Y-%m-%d") if item.created_at else "Unknown"
+            items_by_day[day] += item.quantity
+
+    # Sort days chronologically
+    sorted_days = sorted(boxes_by_day.keys())
+    daily_stats = []
+    for day in sorted_days:
+        entry = boxes_by_day[day]
+        daily_stats.append({
+            "date": day,
+            "boxes": entry["boxes"],
+            "items": entry["items"],
+            "sealed": entry["sealed"],
+        })
+
+    # Today's stats
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_data = boxes_by_day.get(today, {"boxes": 0, "items": 0, "sealed": 0})
+
+    # This week's stats (last 7 days)
+    week_boxes = 0
+    week_items = 0
+    for i in range(7):
+        d = (datetime.now(timezone.utc) - timedelta(days=i)).strftime("%Y-%m-%d")
+        if d in boxes_by_day:
+            week_boxes += boxes_by_day[d]["boxes"]
+            week_items += boxes_by_day[d]["items"]
+
+    return jsonify({
+        "daily": daily_stats,
+        "today": {"boxes": today_data["boxes"], "items": today_data["items"]},
+        "this_week": {"boxes": week_boxes, "items": week_items},
+        "total_boxes": len(boxes),
+        "total_items": sum(i.quantity for i in items),
+    })
 
 
 # ── Search ───────────────────────────────────────────────────────────────────
