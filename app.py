@@ -5,6 +5,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 import qrcode
 from flask import Flask, render_template, request, jsonify, send_file
@@ -365,23 +366,31 @@ def delete_item(item_id):
 
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
+    central = ZoneInfo("America/Chicago")
     boxes = Box.query.order_by(Box.created_at).all()
     items = Item.query.all()
 
-    # Boxes per day
+    def to_central_date(dt):
+        """Convert a UTC datetime to a Central Time date string."""
+        if not dt:
+            return "Unknown"
+        utc_dt = dt.replace(tzinfo=timezone.utc)
+        return utc_dt.astimezone(central).strftime("%Y-%m-%d")
+
+    # Boxes per day (Central Time)
     boxes_by_day = defaultdict(lambda: {"boxes": 0, "items": 0, "sealed": 0})
     for box in boxes:
-        day = box.created_at.strftime("%Y-%m-%d") if box.created_at else "Unknown"
+        day = to_central_date(box.created_at)
         boxes_by_day[day]["boxes"] += 1
         boxes_by_day[day]["items"] += sum(i.quantity for i in box.items)
         if box.sealed:
             boxes_by_day[day]["sealed"] += 1
 
-    # Items per day (by when the item's box was created)
+    # Items per day (Central Time, by when the item was created)
     items_by_day = defaultdict(int)
     for item in items:
-        if item.box and item.box.created_at:
-            day = item.created_at.strftime("%Y-%m-%d") if item.created_at else "Unknown"
+        if item.box and item.created_at:
+            day = to_central_date(item.created_at)
             items_by_day[day] += item.quantity
 
     # Sort days chronologically
@@ -396,15 +405,15 @@ def get_stats():
             "sealed": entry["sealed"],
         })
 
-    # Today's stats
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Today's stats (Central Time)
+    today = datetime.now(central).strftime("%Y-%m-%d")
     today_data = boxes_by_day.get(today, {"boxes": 0, "items": 0, "sealed": 0})
 
-    # This week's stats (last 7 days)
+    # This week's stats (last 7 days, Central Time)
     week_boxes = 0
     week_items = 0
     for i in range(7):
-        d = (datetime.now(timezone.utc) - timedelta(days=i)).strftime("%Y-%m-%d")
+        d = (datetime.now(central) - timedelta(days=i)).strftime("%Y-%m-%d")
         if d in boxes_by_day:
             week_boxes += boxes_by_day[d]["boxes"]
             week_items += boxes_by_day[d]["items"]
