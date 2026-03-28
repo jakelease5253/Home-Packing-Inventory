@@ -421,6 +421,7 @@ def get_stats():
     return jsonify({
         "daily": daily_stats,
         "today": {"boxes": today_data["boxes"], "items": today_data["items"]},
+        "today_date": today,
         "this_week": {"boxes": week_boxes, "items": week_items},
         "total_boxes": len(boxes),
         "total_items": sum(i.quantity for i in items),

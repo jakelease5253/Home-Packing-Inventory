@@ -697,6 +697,9 @@ async function renderStatsPage() {
   const daily = stats.daily;
   const maxBoxes = Math.max(1, ...daily.map(d => d.boxes));
 
+  // Today in Central Time (from the server's perspective, use the last date in today's data)
+  const todayCentral = stats.today_date;
+
   // Format date for display
   function fmtDate(dateStr) {
     const d = new Date(dateStr + "T00:00:00");
@@ -751,7 +754,7 @@ async function renderStatsPage() {
           <div class="chart-container">
             ${chartData.map(d => {
               const pct = (d.boxes / maxChartVal) * 100;
-              const isToday = d.date === new Date().toISOString().slice(0, 10);
+              const isToday = d.date === todayCentral;
               return `
                 <div class="chart-row${isToday ? " chart-row-today" : ""}" title="${fmtDateFull(d.date)}: ${d.boxes} box${d.boxes !== 1 ? "es" : ""}, ${d.items} item${d.items !== 1 ? "s" : ""}">
                   <div class="chart-label">${fmtDate(d.date)}</div>
@@ -783,7 +786,7 @@ async function renderStatsPage() {
               </thead>
               <tbody>
                 ${[...daily].reverse().map(d => `
-                  <tr${d.date === new Date().toISOString().slice(0, 10) ? ' class="stats-row-today"' : ""}>
+                  <tr${d.date === todayCentral ? ' class="stats-row-today"' : ""}>
                     <td>${fmtDateFull(d.date)}</td>
                     <td>${d.boxes}</td>
                     <td>${d.items}</td>
