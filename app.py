@@ -1,3 +1,4 @@
+import hmac
 import io
 import os
 import base64
@@ -11,6 +12,7 @@ import qrcode
 from flask import Flask, render_template, request, jsonify, send_file
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 
 app = Flask(__name__)
 _db_url = os.environ.get("DATABASE_URL", "sqlite:///inventory.db")
@@ -30,13 +32,56 @@ DEFAULT_ROOMS = [
 ]
 
 
+# ── API key auth ─────────────────────────────────────────────────────────────
+# Set PACKTRACK_API_KEY in the environment to require a shared secret on every
+# request. Clients supply it via the X-API-Key header (iOS app), a ?key= query
+# param (first web visit, QR scans), or the cookie set after a valid ?key=
+# visit. Leave unset for open access during local development.
+
+API_KEY = os.environ.get("PACKTRACK_API_KEY", "")
+_KEY_COOKIE = "packtrack_key"
+
+
+def _valid_key(value):
+    return bool(value) and hmac.compare_digest(value, API_KEY)
+
+
+@app.before_request
+def require_api_key():
+    if not API_KEY or request.method == "OPTIONS":
+        return None
+    if request.path.startswith("/static/"):
+        return None
+    supplied = (
+        request.headers.get("X-API-Key")
+        or request.args.get("key")
+        or request.cookies.get(_KEY_COOKIE)
+    )
+    if _valid_key(supplied):
+        return None
+    if request.path == "/":
+        return (
+            "<h1>PackTrack</h1><p>This server requires an access key. "
+            "Open the link you were given with <code>?key=...</code> appended.</p>",
+            401,
+        )
+    return jsonify({"error": "Unauthorized: missing or invalid API key"}), 401
+
+
 # ── CORS (allow iOS app to connect) ─────────────────────────────────────────
 
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    # Persist a valid ?key= in a cookie so the browser stays authenticated
+    # on subsequent page loads and same-origin API calls.
+    if API_KEY and _valid_key(request.args.get("key")):
+        response.set_cookie(
+            _KEY_COOKIE, API_KEY,
+            max_age=365 * 24 * 3600, httponly=True, samesite="Lax",
+        )
     return response
 
 
@@ -192,7 +237,11 @@ def get_boxes():
     room_id = request.args.get("room_id")
     query = Box.query
     if room_id:
-        query = query.filter_by(room_id=int(room_id))
+        try:
+            room_id = int(room_id)
+        except ValueError:
+            return jsonify({"error": "room_id must be an integer"}), 400
+        query = query.filter_by(room_id=room_id)
     boxes = query.order_by(Box.room_id, Box.number).all()
     return jsonify([b.to_dict() for b in boxes])
 
@@ -206,18 +255,24 @@ def create_box():
     room = db.session.get(Room, room_id)
     if not room:
         return jsonify({"error": "Room not found"}), 404
-    number = _next_box_number(room_id)
-    name = f"Box {number}"
-    box = Box(
-        room_id=room_id,
-        number=number,
-        name=name,
-        location=room.name,
-        notes=data.get("notes", ""),
-    )
-    db.session.add(box)
-    db.session.commit()
-    return jsonify(box.to_dict()), 201
+    # Two concurrent creations can pick the same number (read-then-write);
+    # the uq_room_number constraint catches it — re-read and retry.
+    for _ in range(3):
+        number = _next_box_number(room_id)
+        box = Box(
+            room_id=room_id,
+            number=number,
+            name=f"Box {number}",
+            location=room.name,
+            notes=data.get("notes", ""),
+        )
+        db.session.add(box)
+        try:
+            db.session.commit()
+            return jsonify(box.to_dict()), 201
+        except IntegrityError:
+            db.session.rollback()
+    return jsonify({"error": "Could not allocate a box number. Please try again."}), 409
 
 
 @app.route("/api/boxes/<box_id>", methods=["GET"])
@@ -234,20 +289,31 @@ def update_box(box_id):
     if not box:
         return jsonify({"error": "Box not found"}), 404
     data = request.json
-    if "room_id" in data:
+    moving = "room_id" in data
+    if moving:
         new_room = db.session.get(Room, data["room_id"])
         if not new_room:
             return jsonify({"error": "Room not found"}), 404
-        box.room_id = new_room.id
-        box.number = _next_box_number(new_room.id)
-        box.name = f"Box {box.number}"
-        box.location = new_room.name
-    if "notes" in data:
-        box.notes = data["notes"]
-    if "sealed" in data:
-        box.sealed = data["sealed"]
-    db.session.commit()
-    return jsonify(box.to_dict())
+    # Same read-then-write race as create_box when allocating a number in
+    # the new room — retry on the unique-constraint violation.
+    for _ in range(3):
+        if moving:
+            box.room_id = new_room.id
+            box.number = _next_box_number(new_room.id)
+            box.name = f"Box {box.number}"
+            box.location = new_room.name
+        if "notes" in data:
+            box.notes = data["notes"]
+        if "sealed" in data:
+            box.sealed = data["sealed"]
+        try:
+            db.session.commit()
+            return jsonify(box.to_dict())
+        except IntegrityError:
+            db.session.rollback()
+            if not moving:
+                break
+    return jsonify({"error": "Could not allocate a box number. Please try again."}), 409
 
 
 @app.route("/api/boxes/mark-printed", methods=["POST"])
@@ -291,6 +357,30 @@ def unseal_box(box_id):
 
 # ── Item API ─────────────────────────────────────────────────────────────────
 
+def _coerce_quantity(value):
+    """Return the quantity as a positive int, or None if invalid."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+def _parse_item_payload(entry):
+    """Validate an item dict from a request; returns (fields, error)."""
+    if not isinstance(entry, dict):
+        return None, "Each item must be an object"
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return None, "Item name is required"
+    quantity = _coerce_quantity(entry.get("quantity", 1))
+    if quantity is None:
+        return None, "Item quantity must be a positive integer"
+    return {"name": name, "quantity": quantity, "category": str(entry.get("category") or "")}, None
+
+
 @app.route("/api/boxes/<box_id>/items", methods=["POST"])
 def add_item(box_id):
     box = db.session.get(Box, box_id)
@@ -298,13 +388,10 @@ def add_item(box_id):
         return jsonify({"error": "Box not found"}), 404
     if box.sealed:
         return jsonify({"error": "Box is sealed. Unseal it first to add items."}), 400
-    data = request.json
-    item = Item(
-        name=data["name"],
-        quantity=data.get("quantity", 1),
-        category=data.get("category", ""),
-        box_id=box_id,
-    )
+    fields, error = _parse_item_payload(request.get_json(silent=True) or {})
+    if error:
+        return jsonify({"error": error}), 400
+    item = Item(box_id=box_id, **fields)
     db.session.add(item)
     db.session.commit()
     return jsonify(item.to_dict()), 201
@@ -317,15 +404,20 @@ def add_items_bulk(box_id):
         return jsonify({"error": "Box not found"}), 404
     if box.sealed:
         return jsonify({"error": "Box is sealed. Unseal it first to add items."}), 400
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    entries = data.get("items", [])
+    if not isinstance(entries, list):
+        return jsonify({"error": "items must be a list"}), 400
+    # Validate everything before inserting anything
+    parsed = []
+    for i, entry in enumerate(entries):
+        fields, error = _parse_item_payload(entry)
+        if error:
+            return jsonify({"error": f"Item {i + 1}: {error}"}), 400
+        parsed.append(fields)
     items = []
-    for entry in data.get("items", []):
-        item = Item(
-            name=entry["name"],
-            quantity=entry.get("quantity", 1),
-            category=entry.get("category", ""),
-            box_id=box_id,
-        )
+    for fields in parsed:
+        item = Item(box_id=box_id, **fields)
         db.session.add(item)
         items.append(item)
     db.session.commit()
@@ -339,13 +431,19 @@ def update_item(item_id):
         return jsonify({"error": "Item not found"}), 404
     if item.box.sealed:
         return jsonify({"error": "Box is sealed"}), 400
-    data = request.json
+    data = request.get_json(silent=True) or {}
     if "name" in data:
-        item.name = data["name"]
+        name = str(data["name"] or "").strip()
+        if not name:
+            return jsonify({"error": "Item name is required"}), 400
+        item.name = name
     if "quantity" in data:
-        item.quantity = data["quantity"]
+        quantity = _coerce_quantity(data["quantity"])
+        if quantity is None:
+            return jsonify({"error": "Item quantity must be a positive integer"}), 400
+        item.quantity = quantity
     if "category" in data:
-        item.category = data["category"]
+        item.category = str(data["category"] or "")
     db.session.commit()
     return jsonify(item.to_dict())
 
@@ -453,11 +551,8 @@ def box_qr(box_id):
     if not box:
         return jsonify({"error": "Box not found"}), 404
 
-    base_url = request.host_url.rstrip("/")
-    qr_data = f"{base_url}/?box={box_id}"
-
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data(qr_data)
+    qr.add_data(_box_link(box_id))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
 
@@ -476,26 +571,37 @@ def box_qr_label(box_id):
     return render_template("label.html", box=box, base_url=request.host_url.rstrip("/"))
 
 
+def _box_link(box_id):
+    """Deep link to a box, including the access key so scanned QR labels work."""
+    link = f"{request.host_url.rstrip('/')}/?box={box_id}"
+    if API_KEY:
+        link += f"&key={API_KEY}"
+    return link
+
+
 def _generate_qr_image(box_id):
     """Generate a QR code as a PIL Image."""
-    base_url = request.host_url.rstrip("/")
-    qr_data = f"{base_url}/?box={box_id}"
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data(qr_data)
+    qr.add_data(_box_link(box_id))
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white")
 
 
 @app.route("/print-labels")
 def print_labels_page():
+    ids = request.args.get("ids", "")
+    try:
+        copies = int(request.args.get("copies", 2))
+        start = int(request.args.get("start", 0))
+    except ValueError:
+        return jsonify({"error": "copies and start must be integers"}), 400
+    if copies < 1 or start < 0:
+        return jsonify({"error": "copies must be >= 1 and start must be >= 0"}), 400
+
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.units import inch
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
-
-    ids = request.args.get("ids", "")
-    copies = int(request.args.get("copies", 2))
-    start = int(request.args.get("start", 0))
     box_ids = [bid.strip() for bid in ids.split(",") if bid.strip()]
     boxes = Box.query.filter(Box.id.in_(box_ids)).order_by(Box.room_id, Box.number).all()
 
@@ -632,18 +738,39 @@ def print_stickers_page():
 
 # ── Photo analysis via Claude Vision ────────────────────────────────────────
 
+_MAX_ANALYSIS_EDGE = 1568  # px; the API rejects images over ~8000px / ~5 MB
+
+
+def _prepare_image_for_analysis(photo_bytes: bytes) -> tuple[str, str]:
+    """Downscale and re-encode an upload as JPEG for the vision API.
+
+    Phone photos routinely exceed the API's size limits; resizing to
+    ~1568px on the long edge keeps requests well under them and cuts
+    token cost. Returns (base64_data, media_type).
+    """
+    from PIL import Image, ImageOps
+
+    img = Image.open(io.BytesIO(photo_bytes))
+    img = ImageOps.exif_transpose(img)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.thumbnail((_MAX_ANALYSIS_EDGE, _MAX_ANALYSIS_EDGE))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return base64.b64encode(buf.getvalue()).decode(), "image/jpeg"
+
+
 def _analyze_image_with_claude(image_b64: str, media_type: str) -> list[dict]:
     """Use Claude Vision API to detect items in a photo."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return []
-
     import anthropic
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic()
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5",
         max_tokens=1024,
+        # Simple listing task: skip adaptive thinking so the full token
+        # budget goes to the item list.
+        thinking={"type": "disabled"},
         messages=[
             {
                 "role": "user",
@@ -673,7 +800,7 @@ def _analyze_image_with_claude(image_b64: str, media_type: str) -> list[dict]:
 
     import json
 
-    text = message.content[0].text.strip()
+    text = next(b.text for b in message.content if b.type == "text").strip()
     # Handle cases where the model wraps JSON in markdown code fences
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -688,19 +815,33 @@ def analyze_photo():
         return jsonify({"error": "No photo uploaded"}), 400
 
     photo = request.files["photo"]
-    media_type = photo.content_type or "image/jpeg"
     photo_bytes = photo.read()
-    photo_b64 = base64.b64encode(photo_bytes).decode()
 
+    detected = []
+    error = None
     try:
-        detected = _analyze_image_with_claude(photo_b64, media_type)
+        photo_b64, media_type = _prepare_image_for_analysis(photo_bytes)
     except Exception:
-        detected = []
+        app.logger.exception("Could not decode uploaded photo")
+        media_type = photo.content_type or "image/jpeg"
+        photo_b64 = base64.b64encode(photo_bytes).decode()
+        error = "Could not read the uploaded image."
+
+    if error is None:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            error = "Photo analysis is not configured (ANTHROPIC_API_KEY is not set)."
+        else:
+            try:
+                detected = _analyze_image_with_claude(photo_b64, media_type)
+            except Exception:
+                app.logger.exception("Photo analysis failed")
+                error = "Photo analysis failed. Check the server logs for details."
 
     return jsonify({
         "message": "Photo received. Please review and confirm the items below.",
         "photo_preview": f"data:{media_type};base64,{photo_b64}",
         "detected_items": detected,
+        "error": error,
     })
 
 
@@ -804,4 +945,6 @@ if __name__ == "__main__":
             print("Get a free token at https://dashboard.ngrok.com/signup")
             sys.exit(1)
 
-    app.run(debug=True, host="0.0.0.0", port=port)
+    # Never enable the Werkzeug debugger when the server is reachable publicly:
+    # it can execute arbitrary Python on the host.
+    app.run(debug=not use_ngrok, host="0.0.0.0", port=port)

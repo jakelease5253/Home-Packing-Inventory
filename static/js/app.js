@@ -645,6 +645,10 @@ function showPhotoModal(boxId) {
       const bulkList = $("#bulkItemList");
       bulkList.innerHTML = "";
 
+      if (result.error) {
+        toast(result.error, "error");
+      }
+
       if (result.detected_items && result.detected_items.length > 0) {
         result.detected_items.forEach(item => addBulkItemRow(item.name));
       } else {
