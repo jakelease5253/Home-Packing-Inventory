@@ -142,12 +142,16 @@ struct BulkPhotoView: View {
         Task {
             do {
                 let result = try await api.uploadPhoto(image)
+                if let analysisError = result.error {
+                    errorMessage = analysisError
+                }
                 if !result.detectedItems.isEmpty {
                     itemNames = result.detectedItems.map(\.name)
                 }
                 photoUploaded = true
             } catch {
                 // Photo upload is optional — still allow manual entry
+                errorMessage = "Photo analysis failed: \(error.localizedDescription)"
                 photoUploaded = true
             }
             isUploading = false

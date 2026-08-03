@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var api: APIService
     @State private var serverURL: String = ""
+    @State private var apiKey: String = ""
     @State private var connectionStatus: ConnectionStatus = .unknown
     @State private var isTesting = false
 
@@ -15,6 +16,11 @@ struct SettingsView: View {
             Section {
                 TextField("Server URL", text: $serverURL)
                     .textContentType(.URL)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                    .onSubmit { saveURL() }
+
+                SecureField("API Key (if required)", text: $apiKey)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .onSubmit { saveURL() }
@@ -72,6 +78,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .onAppear {
             serverURL = api.baseURL
+            apiKey = api.apiKey
         }
     }
 
@@ -80,6 +87,7 @@ struct SettingsView: View {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         api.baseURL = trimmed
         serverURL = trimmed
+        api.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         testConnection()
     }
 

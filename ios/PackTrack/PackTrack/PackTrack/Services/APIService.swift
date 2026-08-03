@@ -10,12 +10,17 @@ class APIService: ObservableObject {
         didSet { UserDefaults.standard.set(baseURL, forKey: "serverURL") }
     }
 
+    @Published var apiKey: String {
+        didSet { UserDefaults.standard.set(apiKey, forKey: "apiKey") }
+    }
+
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
     init() {
         self.baseURL = UserDefaults.standard.string(forKey: "serverURL") ?? "http://localhost:5000"
+        self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         self.session = URLSession(configuration: config)
@@ -99,6 +104,7 @@ class APIService: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        attachAPIKey(&request)
 
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             throw APIError.encodingFailed
@@ -122,11 +128,33 @@ class APIService: ObservableObject {
     // MARK: - QR Code URL
 
     func qrCodeURL(boxId: String) -> URL? {
-        URL(string: "\(baseURL)/api/boxes/\(boxId)/qr")
+        webURL("/api/boxes/\(boxId)/qr")
     }
 
     func boxDeepLink(boxId: String) -> String {
-        "\(baseURL)/?box=\(boxId)"
+        webURLString("/?box=\(boxId)")
+    }
+
+    /// URL for links opened outside the app (Safari, QR images) — appends the
+    /// API key as a query param since those requests can't send headers.
+    func webURL(_ path: String) -> URL? {
+        URL(string: webURLString(path))
+    }
+
+    private func webURLString(_ path: String) -> String {
+        var urlString = "\(baseURL)\(path)"
+        if !apiKey.isEmpty {
+            let separator = urlString.contains("?") ? "&" : "?"
+            let encoded = apiKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? apiKey
+            urlString += "\(separator)key=\(encoded)"
+        }
+        return urlString
+    }
+
+    private func attachAPIKey(_ request: inout URLRequest) {
+        if !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        }
     }
 
     // MARK: - Search
@@ -142,6 +170,7 @@ class APIService: ObservableObject {
         guard let url = URL(string: "\(baseURL)\(path)") else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        attachAPIKey(&req)
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw APIError.serverError
@@ -154,6 +183,7 @@ class APIService: ObservableObject {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        attachAPIKey(&req)
         if let body = body {
             req.httpBody = try encoder.encode(body)
         }
@@ -173,6 +203,7 @@ class APIService: ObservableObject {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        attachAPIKey(&req)
         if let dict = jsonDict {
             req.httpBody = try JSONSerialization.data(withJSONObject: dict)
         }
@@ -192,11 +223,13 @@ struct PhotoAnalysisResult: Codable {
     let message: String
     let photoPreview: String?
     let detectedItems: [DetectedItem]
+    let error: String?
 
     enum CodingKeys: String, CodingKey {
         case message
         case photoPreview = "photo_preview"
         case detectedItems = "detected_items"
+        case error
     }
 }
 
