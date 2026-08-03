@@ -130,7 +130,6 @@ class Box(db.Model):
     number = db.Column(db.Integer, nullable=False)
     name = db.Column(db.String(120), nullable=False)
     room_id = db.Column(db.Integer, db.ForeignKey("room.id"), nullable=False)
-    location = db.Column(db.String(120), default="")
     notes = db.Column(db.Text, default="")
     sealed = db.Column(db.Boolean, default=False)
     label_printed = db.Column(db.Boolean, default=False)
@@ -146,7 +145,8 @@ class Box(db.Model):
             "name": self.name,
             "room_id": self.room_id,
             "room_name": self.room.name if self.room else "",
-            "location": self.room.name if self.room else self.location,
+            # Kept for older clients (the iOS Box model decodes this key)
+            "location": self.room.name if self.room else "",
             "notes": self.notes,
             "sealed": self.sealed,
             "label_printed": self.label_printed,
@@ -263,7 +263,6 @@ def create_box():
             room_id=room_id,
             number=number,
             name=f"Box {number}",
-            location=room.name,
             notes=data.get("notes", ""),
         )
         db.session.add(box)
@@ -298,10 +297,12 @@ def update_box(box_id):
     # the new room — retry on the unique-constraint violation.
     for _ in range(3):
         if moving:
+            # Allocate before touching the box: assigning room_id first
+            # makes autoflush count the box itself in the new room.
+            number = _next_box_number(new_room.id)
             box.room_id = new_room.id
-            box.number = _next_box_number(new_room.id)
-            box.name = f"Box {box.number}"
-            box.location = new_room.name
+            box.number = number
+            box.name = f"Box {number}"
         if "notes" in data:
             box.notes = data["notes"]
         if "sealed" in data:
@@ -530,17 +531,27 @@ def get_stats():
 
 @app.route("/api/boxes/search", methods=["GET"])
 def search_boxes():
-    q = request.args.get("q", "").strip().lower()
+    q = request.args.get("q", "").strip()
     if not q:
         return get_boxes()
-    boxes = Box.query.order_by(Box.room_id, Box.number).all()
-    results = []
-    for box in boxes:
-        room_name = box.room.name.lower() if box.room else ""
-        if (q in box.name.lower() or q in room_name
-                or any(q in item.name.lower() for item in box.items)):
-            results.append(box.to_dict())
-    return jsonify(results)
+    escaped = q.replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
+    pattern = f"%{escaped}%"
+    boxes = (
+        Box.query
+        .outerjoin(Room, Box.room_id == Room.id)
+        .outerjoin(Item, Item.box_id == Box.id)
+        .filter(
+            db.or_(
+                Box.name.ilike(pattern, escape="\\"),
+                Room.name.ilike(pattern, escape="\\"),
+                Item.name.ilike(pattern, escape="\\"),
+            )
+        )
+        .distinct()
+        .order_by(Box.room_id, Box.number)
+        .all()
+    )
+    return jsonify([b.to_dict() for b in boxes])
 
 
 # ── QR Code ──────────────────────────────────────────────────────────────────
@@ -863,39 +874,43 @@ def _seed_rooms():
 
 
 def _migrate_existing_boxes():
-    """Migrate any existing boxes that lack a room_id."""
+    """Assign any boxes that predate rooms to an 'Uncategorized' room.
+
+    (The location-based room inference ran before the location column was
+    dropped; any remaining orphans can only be bucketed generically.)
+    """
     orphan_boxes = Box.query.filter(
         db.or_(Box.room_id.is_(None), Box.number.is_(None))
     ).all()
     if not orphan_boxes:
         return
 
+    room = Room.query.filter(db.func.lower(Room.name) == "uncategorized").first()
+    if not room:
+        room = Room(name="Uncategorized", is_custom=True)
+        db.session.add(room)
+        db.session.flush()
     for box in orphan_boxes:
-        # Try to find or create a room matching the box's location
-        room_name = box.location.strip() if box.location else "Uncategorized"
-        if not room_name:
-            room_name = "Uncategorized"
-        room = Room.query.filter(db.func.lower(Room.name) == room_name.lower()).first()
-        if not room:
-            room = Room(name=room_name, is_custom=True)
-            db.session.add(room)
-            db.session.flush()
         box.room_id = room.id
         box.number = _next_box_number(room.id)
         box.name = f"Box {box.number}"
-        box.location = room.name
     db.session.commit()
 
 
 def _migrate_schema():
-    """Add any missing columns to existing tables."""
+    """Bring existing tables in line with the current models."""
     import sqlalchemy
     inspector = sqlalchemy.inspect(db.engine)
-    box_columns = {col["name"] for col in inspector.get_columns("box")} if inspector.has_table("box") else set()
-    if "label_printed" not in box_columns and "box" in {t for t in inspector.get_table_names()}:
-        with db.engine.connect() as conn:
+    if not inspector.has_table("box"):
+        return
+    box_columns = {col["name"] for col in inspector.get_columns("box")}
+    with db.engine.connect() as conn:
+        if "label_printed" not in box_columns:
             conn.execute(sqlalchemy.text("ALTER TABLE box ADD COLUMN label_printed BOOLEAN DEFAULT FALSE"))
-            conn.commit()
+        if "location" in box_columns:
+            # Redundant copy of the room name; to_dict derives it instead
+            conn.execute(sqlalchemy.text("ALTER TABLE box DROP COLUMN location"))
+        conn.commit()
 
 
 with app.app_context():
