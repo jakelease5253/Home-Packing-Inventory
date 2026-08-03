@@ -19,7 +19,7 @@ class APIService: ObservableObject {
     private let encoder: JSONEncoder
 
     init() {
-        self.baseURL = UserDefaults.standard.string(forKey: "serverURL") ?? "http://localhost:5000"
+        self.baseURL = UserDefaults.standard.string(forKey: "serverURL") ?? "https://packtrack.up.railway.app"
         self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15

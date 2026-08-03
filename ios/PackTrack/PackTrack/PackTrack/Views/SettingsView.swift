@@ -47,7 +47,7 @@ struct SettingsView: View {
             } header: {
                 Text("Server Connection")
             } footer: {
-                Text("Enter the URL where your PackTrack server is running (e.g., http://192.168.1.100:5000).")
+                Text("Enter the URL where your PackTrack server is running (e.g., https://packtrack.up.railway.app), plus the API key if the server requires one.")
             }
 
             Section("About") {
